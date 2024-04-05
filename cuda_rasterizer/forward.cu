@@ -297,7 +297,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
-
+	// __shared__ float weights[BLOCK_SIZE*300];
 	// Initialize helper variables
 	float T = 1.0f;
 	uint32_t contributor = 0;
@@ -359,10 +359,15 @@ renderCUDA(
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
-			if(last_contributor<500)
+			if(last_contributor<500){
 				weights[last_contributor] = alpha * T;
 				depth[last_contributor] = depths[collected_id[j]];
+				for (int k = 0; k < last_contributor; k++) {
+					DD_loss += alpha * T * weights[k] * abs(depths[collected_id[j]] - depth[k]);
+					// DD_loss += weights[0] ;
 
+				}
+			}
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -374,13 +379,6 @@ renderCUDA(
 	// delete[] weights;
 	// printf("contributor: %d\n", contributor);
 	// DD_loss = depths[collected_id[1]]-depths[collected_id[0]];
-    for (int i = 0; i < min(contributor,500); ++i) {
-        float sum_dut_w = 0;
-        for (int j = 0; j < min(contributor,500); ++j) {
-            sum_dut_w += abs(depth[j] - depth[i]) * weights[j];
-        }
-        DD_loss += weights[i] * sum_dut_w;
-    }
 	// cudaFree(weights);
 	// All threads that treat valid pixel write out their final
 	// rendering data to the frame and auxiliary buffers.
