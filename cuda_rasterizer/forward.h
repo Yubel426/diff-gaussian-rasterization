@@ -91,6 +91,7 @@ namespace FORWARD
 		float* out_opacity,
 		float* out_depth,
 		float* out_normal,
+		float* out_depth_distortion,
 		float* out_albedo,
 		float* out_roughness,
 		float* out_metallic,

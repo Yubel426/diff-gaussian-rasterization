@@ -123,7 +123,7 @@
  }
  
  
- std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+ std::tuple<int, torch::Tensor,torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
 	 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
  RasterizeGaussiansCUDA(
 	 const torch::Tensor& background,  	// [3, H, W]
@@ -168,6 +168,7 @@
 	 torch::Tensor out_opacity = torch::full({1, H, W}, 0.0, float_opts);
 	 torch::Tensor out_depth = torch::full({1, H, W}, 0.0, float_opts);
 	 torch::Tensor out_normal = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
+	 torch::Tensor out_depth_distortion = torch::full({1, H, W}, 0.0, float_opts);
 	 torch::Tensor out_albedo = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
 	 torch::Tensor out_roughness = torch::full({1, H, W}, 0.0, float_opts);
 	 torch::Tensor out_metallic = torch::full({1, H, W}, 0.0, float_opts);
@@ -219,6 +220,7 @@
 			 out_opacity.contiguous().data<float>(),
 			 out_depth.contiguous().data<float>(),
 			 out_normal.contiguous().data<float>(),
+			 out_depth_distortion.contiguous().data<float>(),
 			 out_albedo.contiguous().data<float>(),
 			 out_roughness.contiguous().data<float>(),
 			 out_metallic.contiguous().data<float>(),
@@ -235,6 +237,7 @@
 		 out_opacity,
 		 out_depth,
 		 out_normal,
+		 out_depth_distortion,
 		 out_albedo,
 		 out_roughness,
 		 out_metallic

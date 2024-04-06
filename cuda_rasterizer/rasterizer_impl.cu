@@ -393,7 +393,8 @@
 	 float* out_color,		// [3, H, W]
 	 float* out_opacity,		// [1, H, W]
 	 float* out_depth,		// [1, H, W]
-	 float* out_normal,		// [3, H, W]
+	 float* out_normal,	
+	 float* out_depth_distortion,	// [3, H, W]
 	 float* out_albedo,		// [3, H, W]
 	 float* out_roughness,	// [1, H, W]
 	 float* out_metallic,	// [1, H, W]
@@ -535,6 +536,7 @@
 		 out_opacity,
 		 out_depth,
 		 out_normal,
+		 out_depth_distortion,
 		 out_albedo,
 		 out_roughness,
 		 out_metallic,

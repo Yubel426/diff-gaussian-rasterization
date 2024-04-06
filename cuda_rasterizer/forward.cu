@@ -302,7 +302,7 @@
 	 bool inside = pix.x < W && pix.y < H;
 	 // Done threads can help with fetching, but don't rasterize
 	 bool done = !inside;
- 
+
 	 // Load start/end range of IDs to process in bit sorted list.
 	 uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 	 const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
@@ -438,6 +438,7 @@
 	 float* __restrict__ out_opacity,
 	 float* __restrict__ out_depth,
 	 float* __restrict__ out_normal,
+	 float* __restrict__ out_depth_distortion,
 	 float* __restrict__ out_albedo,
 	 float* __restrict__ out_roughness,
 	 float* __restrict__ out_metallic,
@@ -481,6 +482,10 @@
 	 float O = 0.0f;
 	 float max_weight = 0.0f;
 	 float except_depth = 0.0f;
+	 float weights[500];
+	 float depths[500];
+	 // cudaMalloc((void**)&weights, 50 * sizeof(float));
+	 float DD_loss = { 0 }; 
  
 	 // Iterate over batches until all done or range is complete
 	 for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -548,7 +553,13 @@
 			 }
 			 R += roughness[collected_id[j]] * weight;
 			 M += metallic[collected_id[j]] * weight;
- 
+			 if(last_contributor<500){
+				weights[last_contributor] = alpha * T;
+				depths[last_contributor] = depth[collected_id[j]];
+				for (int k = 0; k < last_contributor; k++) {
+					DD_loss += alpha * T * weights[k] * abs(depth[collected_id[j]] - depths[k]);
+				}
+			 }
 			 // softmax weight
 			 D += depth[collected_id[j]] * weight;
 			 O += weight;
@@ -589,6 +600,7 @@
 			 out_depth[pix_id] = 0.0f;
 		 }
 		 out_opacity[pix_id] = O;
+		 out_depth_distortion[pix_id] = DD_loss;
 	 }
  }
  
@@ -722,6 +734,7 @@
 	 float* out_opacity,
 	 float* out_depth,
 	 float* out_normal,
+	 float* out_depth_distortion,
 	 float* out_albedo,
 	 float* out_roughness,
 	 float* out_metallic,
@@ -749,6 +762,7 @@
 		 out_opacity,
 		 out_depth,
 		 out_normal,
+		 out_depth_distortion,
 		 out_albedo,
 		 out_roughness,
 		 out_metallic,

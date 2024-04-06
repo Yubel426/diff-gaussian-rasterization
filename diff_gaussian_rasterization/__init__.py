@@ -68,6 +68,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        torch.Tensor,
     ]:
         # Restructure arguments the way that the C++ lib expects them
         args = (
@@ -133,6 +134,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 opacity_map,
                 depth,
                 out_normal,
+                out_depth_distortion,
                 albedo_map,
                 roughness_map,
                 metallic_map,
@@ -163,6 +165,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             opacity_map,
             depth,
             out_normal,
+            out_depth_distortion,
             albedo_map,
             roughness_map,
             metallic_map,
@@ -176,6 +179,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         grad_out_opacity: Optional[torch.Tensor] = None,
         grad_depth: Optional[torch.Tensor] = None,
         grad_out_normal: Optional[torch.Tensor] = None,
+        grad_NC_loss: Optional[torch.Tensor] = None,
         grad_out_albedo: Optional[torch.Tensor] = None,
         grad_out_roughness: Optional[torch.Tensor] = None,
         grad_out_metallic: Optional[torch.Tensor] = None,
@@ -346,6 +350,7 @@ class GaussianRasterizer(nn.Module):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        torch.Tensor
     ]:
         raster_settings = self.raster_settings
 
@@ -380,6 +385,7 @@ class GaussianRasterizer(nn.Module):
             opacity_map,
             depth,
             out_normal,
+            out_depth_distortion,
             albedo_map,
             roughness_map,
             metallic_map,
@@ -423,6 +429,7 @@ class GaussianRasterizer(nn.Module):
             depth,
             normal_from_depth,
             out_normal,
+            out_depth_distortion,
             albedo_map,
             roughness_map,
             metallic_map,
