@@ -151,30 +151,74 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 	cov3D[5] = Sigma[2][2];
 }
 
+__device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4 rot, float3 p, const float* projmatrix)
+{
+	// Create scaling matrix
+	glm::mat3 S = glm::mat3(1.0f);
+	S[0][0] = mod * scale.x;
+	S[1][1] = mod * scale.y;
+	S[2][2] = 0.;
+
+	// Normalize quaternion to get valid rotation
+	glm::vec4 q = rot;// / glm::length(rot);
+	float r = q.x;
+	float x = q.y;
+	float y = q.z;
+	float z = q.w;
+
+	// Compute rotation matrix from quaternion
+	glm::mat3 R = glm::mat3(
+		1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
+		2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
+		2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
+	);
+
+	glm::mat3 RS = R * S;
+	glm::mat4 H;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			H[i][j] = RS[i][j];
+		}
+	}
+	H[0][3] = p.x;
+	H[1][3] = p.y;
+	H[2][3] = p.z;
+	H[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
+		projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
+		projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
+		projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
+	glm::mat4 res = W * H;
+	return res;
+
+}
+
 // Perform initial steps for each Gaussian prior to rasterization.
 template<int C>
 __global__ void preprocessCUDA(int P, int D, int M,
-	const float* orig_points,
-	const glm::vec3* scales,
+	const float* orig_points, // P_k
+	const glm::vec3* scales, // S
 	const float scale_modifier,
-	const glm::vec4* rotations,
+	const glm::vec4* rotations, // R
 	const float* opacities,
 	const float* shs,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
 	const float* viewmatrix,
-	const float* projmatrix,
+	const float* projmatrix, // W
 	const glm::vec3* cam_pos,
 	const int W, int H,
 	const float tan_fovx, float tan_fovy,
 	const float focal_x, float focal_y,
 	int* radii,
-	float2* points_xy_image,
+	float2* points_xy_image, // x,y
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
 	float4* conic_opacity,
+	float4* h_u,
+	float4* h_v,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered)
@@ -193,8 +237,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view))
 		return;
 
-	// Transform point by projecting
+	// compute WH
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+	glm::mat4 WH = computeWH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
+
+	// Transform point by projecting
 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
@@ -235,7 +282,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
 		return;
-
+	// compute h_u, h_v
+	glm::vec4 h_x(-1.f, 0.f, 0.f, point_image.x); 
+	glm::vec4 h_y(0.f, -1.f, 0.f, point_image.y);
+	glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
+	glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
 	if (colors_precomp == nullptr)
@@ -250,6 +301,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	depths[idx] = p_view.z;
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
+	h_u[idx] = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
+	h_v[idx] = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
@@ -267,6 +320,8 @@ renderCUDA(
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
 	const float4* __restrict__ conic_opacity,
+	const float4* __restrict__ h_u,
+	const float4* __restrict__ h_v,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
@@ -295,6 +350,8 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float4 collected_h_u[BLOCK_SIZE];
+	__shared__ float4 collected_h_v[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -318,6 +375,8 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			collected_h_u[block.thread_rank()] = h_u[coll_id];
+			collected_h_v[block.thread_rank()] = h_v[coll_id];
 		}
 		block.sync();
 
@@ -332,7 +391,12 @@ renderCUDA(
 			float2 xy = collected_xy[j];
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float4 con_o = collected_conic_opacity[j];
-			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			float4 hu = collected_h_u[j];
+			float4 hv = collected_h_v[j];
+			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			float u_x = (hu.y * hv.w - hu.w * hv.y) / (hu.x * hv.y - hu.y * hv.x);
+			float u_y = (hu.w * hv.x - hu.x * hv.w) / (hu.x * hv.y - hu.y * hv.x);
+			float power = -0.5f * (u_x * u_x + u_y * u_y);
 			if (power > 0.0f)
 				continue;
 
@@ -381,6 +445,8 @@ void FORWARD::render(
 	const float2* means2D,
 	const float* colors,
 	const float4* conic_opacity,
+	const float4* h_u,
+	const float4* h_v,
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
@@ -393,6 +459,8 @@ void FORWARD::render(
 		means2D,
 		colors,
 		conic_opacity,
+		h_u,
+		h_v,
 		final_T,
 		n_contrib,
 		bg_color,
@@ -421,6 +489,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	float* cov3Ds,
 	float* rgb,
 	float4* conic_opacity,
+	float4* h_u,
+	float4* h_v,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered)
@@ -448,6 +518,8 @@ void FORWARD::preprocess(int P, int D, int M,
 		cov3Ds,
 		rgb,
 		conic_opacity,
+		h_u,
+		h_v,
 		grid,
 		tiles_touched,
 		prefiltered

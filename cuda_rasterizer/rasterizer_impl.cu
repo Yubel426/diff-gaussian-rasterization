@@ -221,7 +221,6 @@ int CudaRasterizer::Rasterizer::forward(
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
-
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
@@ -267,6 +266,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.cov3D,
 		geomState.rgb,
 		geomState.conic_opacity,
+		geomState.h_u,
+		geomState.h_v,
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered
@@ -327,6 +328,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.means2D,
 		feature_ptr,
 		geomState.conic_opacity,
+		geomState.h_u,
+		geomState.h_v,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,

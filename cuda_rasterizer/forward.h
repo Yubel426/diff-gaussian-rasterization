@@ -43,6 +43,8 @@ namespace FORWARD
 		float* cov3Ds,
 		float* colors,
 		float4* conic_opacity,
+		float4* h_u,
+		float4* h_v,
 		const dim3 grid,
 		uint32_t* tiles_touched,
 		bool prefiltered);
@@ -56,6 +58,8 @@ namespace FORWARD
 		const float2* points_xy_image,
 		const float* features,
 		const float4* conic_opacity,
+		const float4* h_u,
+		const float4* h_v,
 		float* final_T,
 		uint32_t* n_contrib,
 		const float* bg_color,
