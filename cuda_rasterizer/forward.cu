@@ -151,6 +151,7 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 	cov3D[5] = Sigma[2][2];
 }
 
+// compute WH matrix
 __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4 rot, float3 p, const float* projmatrix)
 {
 	// Create scaling matrix
@@ -167,12 +168,15 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	float z = q.w;
 
 	// Compute rotation matrix from quaternion
-	glm::mat3 R = glm::mat3(
-		1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
-		2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
-		2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
-	);
-
+	// glm::mat3 R = glm::mat3(
+	// 	1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
+	// 	2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
+	// 	2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
+	// );
+	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y));
+	glm::vec3 t_v = glm::vec3(2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x));
+	glm::vec3 t_w = glm::cross(t_u, t_v); //TODO: normalize t_w?
+	glm::mat3 R = glm::mat3(t_u, t_v, t_w);
 	glm::mat3 RS = R * S;
 	glm::mat4 H;
 	for (int i = 0; i < 3; i++) {
@@ -216,7 +220,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
-	float4* conic_opacity,
 	float4* h_u,
 	float4* h_v,
 	const dim3 grid,
@@ -298,13 +301,14 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Store some useful helper data for the next steps.
+	//TODO: remove conic_opacity and add opacities
 	depths[idx] = p_view.z;
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
 	h_u[idx] = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
 	h_v[idx] = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
 	// Inverse 2D covariance and opacity neatly pack into one float4
-	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
+	// conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
@@ -319,7 +323,7 @@ renderCUDA(
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
-	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ opacity,
 	const float4* __restrict__ h_u,
 	const float4* __restrict__ h_v,
 	float* __restrict__ final_T,
@@ -349,7 +353,7 @@ renderCUDA(
 	// Allocate storage for batches of collectively fetched data.
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
-	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ float4 collected_h_u[BLOCK_SIZE];
 	__shared__ float4 collected_h_v[BLOCK_SIZE];
 
@@ -374,7 +378,7 @@ renderCUDA(
 			int coll_id = point_list[range.x + progress];
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
-			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			collected_opacity[block.thread_rank()] = opacity[coll_id];
 			collected_h_u[block.thread_rank()] = h_u[coll_id];
 			collected_h_v[block.thread_rank()] = h_v[coll_id];
 		}
@@ -390,7 +394,7 @@ renderCUDA(
 			// Splatting" by Zwicker et al., 2001)
 			float2 xy = collected_xy[j];
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
-			float4 con_o = collected_conic_opacity[j];
+			float o = collected_opacity[j];
 			float4 hu = collected_h_u[j];
 			float4 hv = collected_h_v[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
@@ -404,7 +408,7 @@ renderCUDA(
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
-			float alpha = min(0.99f, con_o.w * exp(power));
+			float alpha = min(0.99f, o * exp(power)); //TODO: remove con_o and add opacities[idx]
 			if (alpha < 1.0f / 255.0f)
 				continue;
 			float test_T = T * (1 - alpha);
@@ -444,7 +448,7 @@ void FORWARD::render(
 	int W, int H,
 	const float2* means2D,
 	const float* colors,
-	const float4* conic_opacity,
+	const float* opacity,
 	const float4* h_u,
 	const float4* h_v,
 	float* final_T,
@@ -458,7 +462,7 @@ void FORWARD::render(
 		W, H,
 		means2D,
 		colors,
-		conic_opacity,
+		opacity,
 		h_u,
 		h_v,
 		final_T,
@@ -488,7 +492,6 @@ void FORWARD::preprocess(int P, int D, int M,
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
-	float4* conic_opacity,
 	float4* h_u,
 	float4* h_v,
 	const dim3 grid,
@@ -517,7 +520,6 @@ void FORWARD::preprocess(int P, int D, int M,
 		depths,
 		cov3Ds,
 		rgb,
-		conic_opacity,
 		h_u,
 		h_v,
 		grid,
