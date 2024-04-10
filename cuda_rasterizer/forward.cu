@@ -197,6 +197,7 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 
 }
 
+// MARK: preprocess
 // Perform initial steps for each Gaussian prior to rasterization.
 template<int C>
 __global__ void preprocessCUDA(int P, int D, int M,
@@ -220,15 +221,14 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
-	float4* h_u,
-	float4* h_v,
+	glm::mat4* WHs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
-		return;
+		return;	
 
 	// Initialize radius and touched tiles to 0. If this isn't changed,
 	// this Gaussian will not be processed further.
@@ -262,6 +262,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		cov3D = cov3Ds + idx * 6;
 	}
 
+	//TODO: how to compute radius in 2dgs?
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
 
@@ -302,16 +303,18 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	//TODO: remove conic_opacity and add opacities
+	//TODO: modify depths in 2DGS
 	depths[idx] = p_view.z;
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
-	h_u[idx] = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
-	h_v[idx] = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
+	WHs[idx] = WH;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	// conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
+// MARK: render
+// TODO: romve points_xy_image and related code
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
@@ -324,8 +327,7 @@ renderCUDA(
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
 	const float* __restrict__ opacity,
-	const float4* __restrict__ h_u,
-	const float4* __restrict__ h_v,
+	const glm::mat4* __restrict__ WHs,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
@@ -354,8 +356,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
-	__shared__ float4 collected_h_u[BLOCK_SIZE];
-	__shared__ float4 collected_h_v[BLOCK_SIZE];
+	__shared__ glm::mat4* collected_WH[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -379,8 +380,7 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_opacity[block.thread_rank()] = opacity[coll_id];
-			collected_h_u[block.thread_rank()] = h_u[coll_id];
-			collected_h_v[block.thread_rank()] = h_v[coll_id];
+			collected_WH[block.thread_rank()] = WHs[coll_id];
 		}
 		block.sync();
 
@@ -395,9 +395,17 @@ renderCUDA(
 			float2 xy = collected_xy[j];
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float o = collected_opacity[j];
-			float4 hu = collected_h_u[j];
-			float4 hv = collected_h_v[j];
+			glm::mat4 WH = collected_WH[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			// TODO: image coordinates to ndc coordinates?
+			glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
+			glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
+			// TODO: 
+			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
+			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
+			float4 h_u = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
+			float4 h_v = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
+
 			float u_x = (hu.y * hv.w - hu.w * hv.y) / (hu.x * hv.y - hu.y * hv.x);
 			float u_y = (hu.w * hv.x - hu.x * hv.w) / (hu.x * hv.y - hu.y * hv.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
@@ -449,8 +457,7 @@ void FORWARD::render(
 	const float2* means2D,
 	const float* colors,
 	const float* opacity,
-	const float4* h_u,
-	const float4* h_v,
+	const glm::mat4* WHs,
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
@@ -463,8 +470,7 @@ void FORWARD::render(
 		means2D,
 		colors,
 		opacity,
-		h_u,
-		h_v,
+		WHs,
 		final_T,
 		n_contrib,
 		bg_color,
@@ -492,8 +498,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
-	float4* h_u,
-	float4* h_v,
+	glm::mat4* WHs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered)
@@ -520,8 +525,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		depths,
 		cov3Ds,
 		rgb,
-		h_u,
-		h_v,
+		WHs,
 		grid,
 		tiles_touched,
 		prefiltered
