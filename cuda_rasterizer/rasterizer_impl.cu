@@ -160,9 +160,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
-	obtain(chunk, geom.conic_opacity, P, 128);
-	obtain(chunk, geom.h_u, P, 128);
-	obtain(chunk, geom.h_v, P, 128);
+	obtain(chunk, geom.WHs, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
@@ -195,6 +193,7 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 	return binning;
 }
 
+// MARK: forward pass
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
 int CudaRasterizer::Rasterizer::forward(
@@ -267,9 +266,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.depths,
 		geomState.cov3D,
 		geomState.rgb,
-		geomState.conic_opacity,
-		geomState.h_u,
-		geomState.h_v,
+		geomState.WHs,
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered
@@ -329,9 +326,8 @@ int CudaRasterizer::Rasterizer::forward(
 		width, height,
 		geomState.means2D,
 		feature_ptr,
-		geomState.conic_opacity,
-		geomState.h_u,
-		geomState.h_v,
+		opacities,
+		geomState.WHs,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
@@ -340,6 +336,7 @@ int CudaRasterizer::Rasterizer::forward(
 	return num_rendered;
 }
 
+// MARK: backward pass
 // Produce necessary gradients for optimization, corresponding
 // to forward render pass
 void CudaRasterizer::Rasterizer::backward(
@@ -349,6 +346,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* means3D,
 	const float* shs,
 	const float* colors_precomp,
+	const float* opacities,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
@@ -396,19 +394,26 @@ void CudaRasterizer::Rasterizer::backward(
 		tile_grid,
 		block,
 		imgState.ranges,
+		(float3*)means3D,
 		binningState.point_list,
 		width, height,
 		background,
 		geomState.means2D,
-		geomState.conic_opacity,
+		opacities,
+		(glm::vec4*)rotations,
+		(glm::vec3*)scales,
+		scale_modifier,
+		projmatrix,
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		dL_dpix,
-		(float3*)dL_dmean2D,
-		(float4*)dL_dconic,
 		dL_dopacity,
-		dL_dcolor), debug)
+		dL_dcolor,
+		(float3*)dL_dmean3D,
+		(float3*)dL_dscale,
+		(float4*)dL_drot
+		), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
@@ -429,7 +434,7 @@ void CudaRasterizer::Rasterizer::backward(
 		tan_fovx, tan_fovy,
 		(glm::vec3*)campos,
 		(float3*)dL_dmean2D,
-		dL_dconic,
+		dL_dopacity,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
 		dL_dcov3D,

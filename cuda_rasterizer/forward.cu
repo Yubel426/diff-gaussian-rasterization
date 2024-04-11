@@ -241,6 +241,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		return;
 
 	// compute WH
+	//TODO: is proj world to screen matrix?
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 	glm::mat4 WH = computeWH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
 
@@ -286,11 +287,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
 		return;
-	// compute h_u, h_v
-	glm::vec4 h_x(-1.f, 0.f, 0.f, point_image.x); 
-	glm::vec4 h_y(0.f, -1.f, 0.f, point_image.y);
-	glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
-	glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
+
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
 	if (colors_precomp == nullptr)
@@ -356,7 +353,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
-	__shared__ glm::mat4* collected_WH[BLOCK_SIZE];
+	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -392,19 +389,17 @@ renderCUDA(
 
 			// Resample using conic matrix (cf. "Surface 
 			// Splatting" by Zwicker et al., 2001)
-			float2 xy = collected_xy[j];
-			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float o = collected_opacity[j];
 			glm::mat4 WH = collected_WH[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			// TODO: image coordinates to ndc coordinates?
 			glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
 			glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
-			// TODO: 
+			// TODO: simplify this
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
-			float4 h_u = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
-			float4 h_v = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
+			float4 hu = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
+			float4 hv = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
 
 			float u_x = (hu.y * hv.w - hu.w * hv.y) / (hu.x * hv.y - hu.y * hv.x);
 			float u_y = (hu.w * hv.x - hu.x * hv.w) / (hu.x * hv.y - hu.y * hv.x);
