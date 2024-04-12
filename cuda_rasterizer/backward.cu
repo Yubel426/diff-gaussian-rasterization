@@ -351,27 +351,132 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 template<int C>
 __global__ void preprocessCUDA(
 	int P, int D, int M,
+	int weight, int height,
 	const float3* means,
 	const int* radii,
 	const float* shs,
 	const bool* clamped,
+	const float* opacities,
 	const glm::vec3* scales,
 	const glm::vec4* rotations,
 	const float scale_modifier,
 	const float* projmatrix,
 	const glm::vec3* campos,
 	float3* dL_dmean2D,
+	const float* dL_dopacity,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
-	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	float3* dL_dscales,
+	float4* dL_drot)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
 		return;
 
+	const glm::vec3 scale = scales[idx];
+	const glm::vec4 rot = rotations[idx];
+	const float dL_do = dL_dopacity[idx];
+	const float o = opacities[idx];
+	float3 p = means[idx];
+	glm::mat3 S = glm::mat3(1.0f);
+	S[0][0] = scale_modifier * scale.x;
+	S[1][1] = scale_modifier * scale.y;
+	S[2][2] = 0.;
+	const glm::vec4 q = rot;
+	const float r = q.x;
+	const float x = q.y;
+	const float y = q.z;
+	const float z = q.w;
+	const glm::vec3 tu = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y));
+	const glm::vec3 tv = glm::vec3(2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x));
+	const glm::vec3 tw = glm::cross(tu, tv); //TODO: normalize t_w?
+	const glm::mat3 R = glm::mat3(tu, tv, tw);
+	const glm::mat3 RS = R * S;
+	glm::mat4 H;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			H[i][j] = RS[i][j];
+		}
+	}
+	H[0][3] = p.x;
+	H[1][3] = p.y;
+	H[2][3] = p.z;
+	H[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
+		projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
+		projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
+		projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
+	const uint2 pix = {idx % D, idx / D};
+	glm::vec4 h_x(-1.f, 0.f, 0.f, pix2Ndc(pix.x, weight));
+	glm::vec4 h_y(0.f, -1.f, 0.f, pix2Ndc(pix.y, height));
+	const glm::vec4 h_u_vec = glm::transpose(W * H) * h_x;
+	const glm::vec4 h_v_vec = glm::transpose(W * H) * h_y;
+	const float4 hu = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
+	const float4 hv = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
+
+	const float u_num = hu.y * hv.w - hu.w * hv.y;
+	const float v_num = hu.w * hv.x - hu.x * hv.w;
+	const float denom = hu.x * hv.y - hu.y * hv.x;
+	const float u = u_num / denom;
+	const float v = v_num / denom;
+
+	const float dL_du = o * dL_do * (-u);
+	const float dL_dv = o * dL_do * (-v);
+
+	const float du_dhux = - u * hv.y / denom;
+	const float du_dhuy = hv.w / denom + hv.x * (hu.y * hv.w - hu.w * hv.y) / (denom * denom);
+	const float du_dhuw = - hv.y / denom;
+
+	const float du_dhvx = - u * hu.y / denom;
+	const float du_dhvy = hu.w / denom + hu.x * (hu.y * hv.w - hu.w * hv.y) / (denom * denom);
+	const float du_dhvw = hu.y / denom;
+
+	const float dv_dhux = - u * hv.w / denom - hv.y * u / denom;
+	const float dv_dhuy = u * hv.x / denom;
+	const float dv_dhuw = hv.x / denom;
+
+	const float dv_dhvx = hu.w / denom + hu.y * (hv.x * hu.w - hu.x * hv.w) / (denom * denom);
+	const float dv_dhvy = - u * hu.x / denom;
+	const float dv_dhvw = - hu.x / denom;
+
+	// dL_dhu -> dL_dcov3D, dL_mean3d
+	const glm::vec4 W_T_hx = glm::transpose(W) * glm::vec4(-1, 0, 0, pix.x);
+	const glm::vec4 W_T_hy = glm::transpose(W) * glm::vec4(0, -1, 0, pix.y);
+	
+	const float3 dhuw_dmean3d = { W_T_hx.x, W_T_hx.y, W_T_hx.z };
+	const float3 dhvw_dmean3d = { W_T_hy.x, W_T_hy.y, W_T_hy.z };
+
+	const float3 du_dtu = { du_dhux * W_T_hx.x * scale.x, du_dhuy * W_T_hx.x * scale.x, 0. };
+	const float3 du_dtv = { du_dhux * W_T_hy.y * scale.y, du_dhuy * W_T_hy.y * scale.y, 0. };
+	const float3 dv_dtu = { dv_dhux * W_T_hx.x * scale.x, dv_dhuy * W_T_hx.x * scale.x, 0. };
+	const float3 dv_dtv = { dv_dhux * W_T_hy.y * scale.y, dv_dhuy * W_T_hy.y * scale.y, 0. };
+
+	const float2 du_dscale = { W_T_hx.x * (tu.x * du_dhux + tu.y * du_dhuy), 
+								W_T_hx.y * (tv.x * du_dhvx + tv.y * du_dhvy) };
+	const float2 dv_dscale = { W_T_hy.x * (tu.x * dv_dhux + tu.y * dv_dhuy), 
+								W_T_hy.y * (tv.x * dv_dhvx + tv.y * dv_dhvy) };
+
+	const float4 du_dr = { 		   			       du_dtu.y *   2.  * z - du_dtu.z * 2. * y,
+													du_dtu.y *   2.  * y + du_dtu.z * 2 * z,
+							du_dtu.x * (-4.) * y + du_dtu.y *   2.  * x - du_dtu.z * 2. * r,
+							du_dtu.x * (-4.) * z + du_dtu.y *   2.  * r + du_dtu.z * 2. * x };
+	const float4 dv_dr = {  dv_dtv.x * (-2.) * z + 						  dv_dtv.z * 2. * x,
+							dv_dtv.x *   2.  * y - dv_dtv.y * (-4.) * x + dv_dtv.z * 2. * r,
+							dv_dtv.x *   2.  * x + 						  dv_dtv.z * 2. * z,
+							dv_dtv.x * (-2.) * r - dv_dtv.y * (-4.) * z + dv_dtv.z * 2. * y };
+
+	dL_dmeans[idx].x = dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * du_dhvw * dhvw_dmean3d.x;
+	dL_dmeans[idx].y = dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * du_dhvw * dhvw_dmean3d.y;
+	dL_dmeans[idx].z = dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * du_dhvw * dhvw_dmean3d.z;
+	dL_dscales[idx].x = du_dscale.x * dL_du + dv_dscale.x * dL_dv;
+	dL_dscales[idx].y = du_dscale.y * dL_dv + dv_dscale.y * dL_dv;
+	dL_drot[idx].x = du_dr.x * dL_du + dv_dr.x * dL_dv;
+	dL_drot[idx].y = du_dr.y * dL_du + dv_dr.y * dL_dv;
+	dL_drot[idx].z = du_dr.z * dL_du + dv_dr.z * dL_dv;
+	dL_drot[idx].w = du_dr.w * dL_du + dv_dr.w * dL_dv;
+				
 	// Taking care of gradients from the screenspace points
 	float3 dL_dmean = {dL_dmeans[idx].x, dL_dmeans[idx].y, dL_dmeans[idx].z};
 	// dL_mean3d -> dL_mean2d due to 3d->2d projection
@@ -395,7 +500,7 @@ renderCUDA(
 	const uint2* __restrict__ ranges,
 	const float3* means3D,
 	const uint32_t* __restrict__ point_list,
-	int W, int H,
+	int weight, int height,
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image, // TODO: Remove
 	const float* __restrict__ opacity,
@@ -416,14 +521,14 @@ renderCUDA(
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
-	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const uint32_t horizontal_blocks = (weight + BLOCK_X - 1) / BLOCK_X;
 	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, weight), min(pix_min.y + BLOCK_Y , height) };
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
-	const uint32_t pix_id = W * pix.y + pix.x;
+	const uint32_t pix_id = weight * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
 
-	const bool inside = pix.x < W&& pix.y < H;
+	const bool inside = pix.x < weight&& pix.y < height;
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
@@ -452,7 +557,7 @@ renderCUDA(
 	float dL_dpixel[C];
 	if (inside)
 		for (int i = 0; i < C; i++)
-			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+			dL_dpixel[i] = dL_dpixels[i * height * weight + pix_id];
 
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
@@ -488,7 +593,6 @@ renderCUDA(
 			if (contributor >= last_contributor)
 				continue;
 
-			//TODO: move to preprocess
 			const glm::vec3 scale = collected_scale[j];
 			const glm::vec4 rot = collected_rot[j];
 			float3 p = collected_mean3d[j];
@@ -521,8 +625,8 @@ renderCUDA(
 				projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
 				projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
 		
-			const glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
-			const glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
+			glm::vec4 h_x(-1.f, 0.f, 0.f, pix2Ndc(pix.x, weight)); 
+			glm::vec4 h_y(0.f, -1.f, 0.f, pix2Ndc(pix.y, height));
 			const glm::vec4 h_u_vec = glm::transpose(W * H) * h_x;
 			const glm::vec4 h_v_vec = glm::transpose(W * H) * h_y;
 			const float4 hu = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
@@ -577,74 +681,20 @@ renderCUDA(
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 
-			const float dL_du = o * dL_dalpha * G * (-u);
-			const float dL_dv = 0 * dL_dalpha * G * (-v);
-
-			const float du_dhux = - u * hv.y / denom;
-			const float du_dhuy = hv.w / denom + hv.x * (hu.y * hv.w - hu.w * hv.y) / (denom * denom);
-			const float du_dhuw = - hv.y / denom;
-
-			const float du_dhvx = - u * hu.y / denom;
-			const float du_dhvy = hu.w / denom + hu.x * (hu.y * hv.w - hu.w * hv.y) / (denom * denom);
-			const float du_dhvw = hu.y / denom;
-
-			const float dv_dhux = - u * hv.w / denom - hv.y * u / denom;
-			const float dv_dhuy = u * hv.x / denom;
-			const float dv_dhuw = hv.x / denom;
-
-			const float dv_dhvx = hu.w / denom + hu.y * (hv.x * hu.w - hu.x * hv.w) / (denom * denom);
-			const float dv_dhvy = - u * hu.x / denom;
-			const float dv_dhvw = - hu.x / denom;
-
-			// dL_dhu -> dL_dcov3D, dL_mean3d
-			const glm::vec4 W_T_hx = glm::transpose(W) * glm::vec4(-1, 0, 0, pix.x);
-			const glm::vec4 W_T_hy = glm::transpose(W) * glm::vec4(0, -1, 0, pix.y);
-			
-			const float3 dhuw_dmean3d = { W_T_hx.x, W_T_hx.y, W_T_hx.z };
-			const float3 dhvw_dmean3d = { W_T_hy.x, W_T_hy.y, W_T_hy.z };
-
-			const float3 du_dtu = { du_dhux * W_T_hx.x * scale.x, du_dhuy * W_T_hx.x * scale.x, 0. };
-			const float3 du_dtv = { du_dhux * W_T_hy.y * scale.y, du_dhuy * W_T_hy.y * scale.y, 0. };
-			const float3 dv_dtu = { dv_dhux * W_T_hx.x * scale.x, dv_dhuy * W_T_hx.x * scale.x, 0. };
-			const float3 dv_dtv = { dv_dhux * W_T_hy.y * scale.y, dv_dhuy * W_T_hy.y * scale.y, 0. };
-
-			const float2 du_dscale = { W_T_hx.x * (tu.x * du_dhux + tu.y * du_dhuy), 
-									   W_T_hx.y * (tv.x * du_dhvx + tv.y * du_dhvy) };
-			const float2 dv_dscale = { W_T_hy.x * (tu.x * dv_dhux + tu.y * dv_dhuy), 
-									   W_T_hy.y * (tv.x * dv_dhvx + tv.y * dv_dhvy) };
-
-			const float4 du_dr = { 		   			       du_dtu.y *   2.  * z - du_dtu.z * 2. * y,
-														   du_dtu.y *   2.  * y + du_dtu.z * 2 * z,
-									du_dtu.x * (-4.) * y + du_dtu.y *   2.  * x - du_dtu.z * 2. * r,
-									du_dtu.x * (-4.) * z + du_dtu.y *   2.  * r + du_dtu.z * 2. * x };
-			const float4 dv_dr = {  dv_dtv.x * (-2.) * z + 						  dv_dtv.z * 2. * x,
-									dv_dtv.x *   2.  * y - dv_dtv.y * (-4.) * x + dv_dtv.z * 2. * r,
-									dv_dtv.x *   2.  * x + 						  dv_dtv.z * 2. * z,
-									dv_dtv.x * (-2.) * r - dv_dtv.y * (-4.) * z + dv_dtv.z * 2. * y };
-
-
-
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
-			atomicAdd(&dL_dmean3D[global_id].x, dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * du_dhvw * dhvw_dmean3d.x);
-			atomicAdd(&dL_dmean3D[global_id].y, dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * du_dhvw * dhvw_dmean3d.y);
-			atomicAdd(&dL_dmean3D[global_id].z, dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * du_dhvw * dhvw_dmean3d.z);
-			atomicAdd(&dL_dscales[global_id].x, du_dscale.x * dL_du + dv_dscale.x * dL_dv);
-			atomicAdd(&dL_dscales[global_id].y, du_dscale.y * dL_dv + dv_dscale.y * dL_dv);
-			atomicAdd(&dL_drot[global_id].x, du_dr.x * dL_du + dv_dr.x * dL_dv);
-			atomicAdd(&dL_drot[global_id].y, du_dr.y * dL_du + dv_dr.y * dL_dv);
-			atomicAdd(&dL_drot[global_id].z, du_dr.z * dL_du + dv_dr.z * dL_dv);
-			atomicAdd(&dL_drot[global_id].w, du_dr.w * dL_du + dv_dr.w * dL_dv);
 		}
 	}
 }
 
 void BACKWARD::preprocess(
 	int P, int D, int M,
+	int weight, int height,
 	const float3* means3D,
 	const int* radii,
 	const float* shs,
 	const bool* clamped,
+	const float* opacities,
 	const glm::vec3* scales,
 	const glm::vec4* rotations,
 	const float scale_modifier,
@@ -655,13 +705,13 @@ void BACKWARD::preprocess(
 	const float tan_fovx, float tan_fovy,
 	const glm::vec3* campos,
 	float3* dL_dmean2D,
-	const float* dL_dconic,
+	const float* dL_dopacity,
 	glm::vec3* dL_dmean3D,
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
-	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	float3* dL_dscale,
+	float4* dL_drot)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
@@ -687,16 +737,19 @@ void BACKWARD::preprocess(
 	// matrix gradients to scale and rotation.
 	preprocessCUDA<NUM_CHANNELS> << < (P + 255) / 256, 256 >> > (
 		P, D, M,
+		weight, height,
 		(float3*)means3D,
 		radii,
 		shs,
 		clamped,
+		opacities,
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
 		projmatrix,
 		campos,
 		(float3*)dL_dmean2D,
+		dL_dopacity,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
 		dL_dcov3D,

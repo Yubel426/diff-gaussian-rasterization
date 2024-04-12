@@ -420,10 +420,12 @@ void CudaRasterizer::Rasterizer::backward(
 	// use the one we computed ourselves.
 	const float* cov3D_ptr = (cov3D_precomp != nullptr) ? cov3D_precomp : geomState.cov3D;
 	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
+		width, height,
 		(float3*)means3D,
 		radii,
 		shs,
 		geomState.clamped,
+		opacities,
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
@@ -439,6 +441,6 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dcolor,
 		dL_dcov3D,
 		dL_dsh,
-		(glm::vec3*)dL_dscale,
-		(glm::vec4*)dL_drot), debug)
+		(float3*)dL_dscale,
+		(float4*)dL_drot), debug)
 }

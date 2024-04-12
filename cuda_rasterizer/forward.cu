@@ -299,14 +299,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Store some useful helper data for the next steps.
-	//TODO: remove conic_opacity and add opacities
 	//TODO: modify depths in 2DGS
 	depths[idx] = p_view.z;
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
 	WHs[idx] = WH;
-	// Inverse 2D covariance and opacity neatly pack into one float4
-	// conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
@@ -351,7 +348,6 @@ renderCUDA(
 
 	// Allocate storage for batches of collectively fetched data.
 	__shared__ int collected_id[BLOCK_SIZE];
-	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
 
@@ -375,7 +371,6 @@ renderCUDA(
 		{
 			int coll_id = point_list[range.x + progress];
 			collected_id[block.thread_rank()] = coll_id;
-			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_opacity[block.thread_rank()] = opacity[coll_id];
 			collected_WH[block.thread_rank()] = WHs[coll_id];
 		}
@@ -393,16 +388,13 @@ renderCUDA(
 			glm::mat4 WH = collected_WH[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			// TODO: image coordinates to ndc coordinates?
-			glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
-			glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
-			// TODO: simplify this
+			glm::vec4 h_x(-1.f, 0.f, 0.f, pix2Ndc(pix.x, W)); 
+			glm::vec4 h_y(0.f, -1.f, 0.f, pix2Ndc(pix.y, H));
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
-			float4 hu = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
-			float4 hv = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
 
-			float u_x = (hu.y * hv.w - hu.w * hv.y) / (hu.x * hv.y - hu.y * hv.x);
-			float u_y = (hu.w * hv.x - hu.x * hv.w) / (hu.x * hv.y - hu.y * hv.x);
+			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
+			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
 			if (power > 0.0f)
 				continue;
@@ -411,7 +403,7 @@ renderCUDA(
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
-			float alpha = min(0.99f, o * exp(power)); //TODO: remove con_o and add opacities[idx]
+			float alpha = min(0.99f, o * exp(power)); 
 			if (alpha < 1.0f / 255.0f)
 				continue;
 			float test_T = T * (1 - alpha);

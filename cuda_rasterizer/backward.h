@@ -45,10 +45,12 @@ namespace BACKWARD
 
 	void preprocess(
 		int P, int D, int M,
+		int weight, int height,
 		const float3* means,
 		const int* radii,
 		const float* shs,
 		const bool* clamped,
+		const float* opacities,
 		const glm::vec3* scales,
 		const glm::vec4* rotations,
 		const float scale_modifier,
@@ -64,8 +66,8 @@ namespace BACKWARD
 		float* dL_dcolor,
 		float* dL_dcov3D,
 		float* dL_dsh,
-		glm::vec3* dL_dscale,
-		glm::vec4* dL_drot);
+		float3* dL_dscale,
+		float4* dL_drot);
 }
 
 #endif
