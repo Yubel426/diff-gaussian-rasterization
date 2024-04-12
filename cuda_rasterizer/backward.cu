@@ -139,7 +139,7 @@ __device__ void computeColorFromSH(int idx, int deg, int max_coeffs, const glm::
 }
 
 // MARK: - Cov2d
-//TODO: only compute dL_dmeans now, remove dL_dcov
+
 // Backward version of INVERSE 2D covariance matrix computation
 // (due to length launched as separate kernel before other 
 // backward steps contained in preprocess)
