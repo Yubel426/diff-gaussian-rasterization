@@ -345,12 +345,11 @@ renderCUDA(
 	uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
 	int toDo = range.y - range.x;
-
 	// Allocate storage for batches of collectively fetched data.
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
-
+	__shared__ float2 collected_xy[BLOCK_SIZE];
 	// Initialize helper variables
 	float T = 1.0f;
 	uint32_t contributor = 0;
@@ -373,10 +372,12 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_opacity[block.thread_rank()] = opacity[coll_id];
 			collected_WH[block.thread_rank()] = WHs[coll_id];
+			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 		}
 		block.sync();
 
 		// Iterate over current batch
+		// per thread for each pixel
 		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
 		{
 			// Keep track of current position in range
@@ -386,24 +387,23 @@ renderCUDA(
 			// Splatting" by Zwicker et al., 2001)
 			float o = collected_opacity[j];
 			glm::mat4 WH = collected_WH[j];
+			float2 xy = collected_xy[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			// TODO: image coordinates to ndc coordinates?
-			glm::vec4 h_x(-1.f, 0.f, 0.f, pix2Ndc(pix.x, W)); 
-			glm::vec4 h_y(0.f, -1.f, 0.f, pix2Ndc(pix.y, H));
+			glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
+			glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
-
 			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
 			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
 			// TODO: object-space filter
+			float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
+
+			float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
 			if (power > 0.0f)
 				continue;
-
-			// Eq. (2) from 3D Gaussian splatting paper.
-			// Obtain alpha by multiplying with Gaussian opacity
-			// and its exponential falloff from mean.
-			// Avoid numerical instabilities (see paper appendix). 
+			power = max(power, power_filter);
 			float alpha = min(0.99f, o * exp(power)); 
 			if (alpha < 1.0f / 255.0f)
 				continue;
@@ -419,6 +419,8 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
 			T = test_T;
+			// if (block.thread_rank() == 0 && block.group_index().x == 0 && (j==0 || j==1))
+			// 	printf("j = %d, pixf.x = %f, color = %f, n_contributor = %d\n", j, pixf.x, C[0], contributor);
 
 			// Keep track of last range entry to update this
 			// pixel.
