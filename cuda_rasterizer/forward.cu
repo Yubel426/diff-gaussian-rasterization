@@ -391,21 +391,24 @@ renderCUDA(
 			// Splatting" by Zwicker et al., 2001)
 			float o = collected_opacity[j];
 			glm::mat4 WH = collected_WH[j];
+			float2 xy = collected_xy[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			// TODO: image coordinates to ndc coordinates?
-			glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
-			glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
+			glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
+			glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
 			// TODO: simplify this
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
-			float4 hu = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
-			float4 hv = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
 
-			float u_x = (hu.y * hv.w - hu.w * hv.y) / (hu.x * hv.y - hu.y * hv.x);
-			float u_y = (hu.w * hv.x - hu.x * hv.w) / (hu.x * hv.y - hu.y * hv.x);
+			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
+			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
+			float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
+
+			float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
 			if (power > 0.0f)
 				continue;
+			power = max(power, power_filter);
 
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity

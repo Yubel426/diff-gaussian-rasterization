@@ -17,6 +17,8 @@
 #include "device_launch_parameters.h"
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
+#include <cmath>
+
 
 namespace FORWARD
 {
