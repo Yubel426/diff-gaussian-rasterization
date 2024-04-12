@@ -45,7 +45,7 @@ __forceinline__ __device__ float ndc2Pix(float v, int S)
 
 __forceinline__ __device__ float pix2Ndc(float v, int S)
 {
-	return 2.0 * v / S - 1.0;
+	return (2.0 * v + 1.0) / S - 1.0;
 }
 
 __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid)
