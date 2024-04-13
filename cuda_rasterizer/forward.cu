@@ -439,31 +439,6 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
 			T = test_T;
-			if (block.thread_rank()==0 && block.group_index().y == 0 &&block.group_index().x == 0){
-				printf("@@@@@@@@@j = %d@@@@@@@@@@\n",j);
-				printf("h_x = %f %f %f %f\n", h_x.x, h_x.y, h_x.z, h_x.w);
-				printf("WH = %f %f %f %f\n", WH[0][0], WH[0][1], WH[0][2], WH[0][3]);
-				printf("h_u = %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
-				printf("u_x = %f u_y = %f\n", u_x, u_y);	
-				printf("h_u*u = %f\n", hu_u);
-				printf("power = %f\n",power);
-				printf("d = %f %f\n", d.x, d.y);
-				printf("power_filter = %f\n",power_filter);
-				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
-			}
-			if (block.thread_rank()==4 && block.group_index().y == 0 && block.group_index().x == 0){
-				printf("@@@@@@@@@j = %d@@@@@@@@@@\n",j);
-				printf("h_x = %f %f %f %f\n", h_x.x, h_x.y, h_x.z, h_x.w);
-				printf("WH = %f %f %f %f\n", WH[0][0], WH[0][1], WH[0][2], WH[0][3]);
-				printf("h_u = %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
-				printf("u_x = %f u_y = %f\n", u_x, u_y);	
-				printf("h_u*u = %f\n", hu_u);
-				printf("power = %f \n",power);
-				printf("d = %f %f\n", d.x, d.y);
-				printf("power_filter = %f\n",power_filter);
-				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
-				printf("################################################\n");	
-	
 		
 			}
 
