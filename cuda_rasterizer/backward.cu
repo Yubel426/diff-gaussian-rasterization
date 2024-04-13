@@ -523,15 +523,13 @@ renderCUDA(
 		
 			const glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
 			const glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
-			const glm::vec4 h_u_vec = glm::transpose(W * H) * h_x;
-			const glm::vec4 h_v_vec = glm::transpose(W * H) * h_y;
-			const float4 hu = {h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w};
-			const float4 hv = {h_v_vec.x, h_v_vec.y, h_v_vec.z, h_v_vec.w};
+			const glm::vec4 hu = glm::transpose(W * H) * h_x;
+			const glm::vec4 hv = glm::transpose(W * H) * h_y;
 
 			// Compute blending values, as before.
 			const float o = collected_opacity[j];
-			const float u_num = hu.y * hv.w - hu.w * hv.y;
-			const float v_num = hu.w * hv.x - hu.x * hv.w;
+			const float u_num = - hu.y * hv.z + hu.w * hv.y + hu.z * hv.y - hu.y * hv.w;
+			const float v_num = - hu.w * hv.x + hu.x * hv.w - hu.z * hv.x + hu.x * hv.z;
 			const float denom = hu.x * hv.y - hu.y * hv.x;
 			const float u = u_num / denom;
 			const float v = v_num / denom;
@@ -580,21 +578,26 @@ renderCUDA(
 			const float dL_du = o * dL_dalpha * G * (-u);
 			const float dL_dv = 0 * dL_dalpha * G * (-v);
 
-			const float du_dhux = - u * hv.y / denom;
-			const float du_dhuy = hv.w / denom + hv.x * (hu.y * hv.w - hu.w * hv.y) / (denom * denom);
-			const float du_dhuw = - hv.y / denom;
+			const float du_dhux = u * hv.y / denom;
+			const float du_dhuy = (- hv.w - hv.z) / denom - hv.x * u / denom;
+			const float du_dhuz = hv.y / denom;
+			const float du_dhuw = hv.y / denom;
 
 			const float du_dhvx = - u * hu.y / denom;
-			const float du_dhvy = hu.w / denom + hu.x * (hu.y * hv.w - hu.w * hv.y) / (denom * denom);
-			const float du_dhvw = hu.y / denom;
+			const float du_dhvy = (hu.z + hu.w) / denom + hu.x * u / denom;
+			const float du_dhvz = - hu.y / denom;
+			const float du_dhvw = - hu.y / denom;
 
-			const float dv_dhux = - u * hv.w / denom - hv.y * u / denom;
-			const float dv_dhuy = u * hv.x / denom;
-			const float dv_dhuw = hv.x / denom;
 
-			const float dv_dhvx = hu.w / denom + hu.y * (hv.x * hu.w - hu.x * hv.w) / (denom * denom);
-			const float dv_dhvy = - u * hu.x / denom;
-			const float dv_dhvw = - hu.x / denom;
+			const float dv_dhux = (hv.z + hv.w) / denom + hv.y * v / denom;
+			const float dv_dhuy = - hv.x * v / denom;
+			const float dv_dhuz = - hv.x * v / denom;
+			const float dv_dhuw = - hv.x * v / denom;
+
+			const float dv_dhvx = (-hu.w - hu.z) / denom - hu.y * u / denom;
+			const float dv_dhvy = hu.x * u / denom;
+			const float dv_dhvz = hu.x / denom;
+			const float dv_dhvw = hu.x / denom;
 
 			// dL_dhu -> dL_dcov3D, dL_mean3d
 			const glm::vec4 W_T_hx = glm::transpose(W) * glm::vec4(-1, 0, 0, pix.x);
@@ -603,18 +606,18 @@ renderCUDA(
 			const float3 dhuw_dmean3d = { W_T_hx.x, W_T_hx.y, W_T_hx.z };
 			const float3 dhvw_dmean3d = { W_T_hy.x, W_T_hy.y, W_T_hy.z };
 
-			const float3 du_dtu = { du_dhux * W_T_hx.x * scale.x, du_dhuy * W_T_hx.x * scale.x, 0. };
-			const float3 du_dtv = { du_dhux * W_T_hy.y * scale.y, du_dhuy * W_T_hy.y * scale.y, 0. };
-			const float3 dv_dtu = { dv_dhux * W_T_hx.x * scale.x, dv_dhuy * W_T_hx.x * scale.x, 0. };
-			const float3 dv_dtv = { dv_dhux * W_T_hy.y * scale.y, dv_dhuy * W_T_hy.y * scale.y, 0. };
+			const float3 du_dtu = { du_dhux * W_T_hx.x * scale.x, du_dhuy * W_T_hx.x * scale.x, du_dhuz * W_T_hx.x * scale.x};
+			const float3 du_dtv = { du_dhux * W_T_hy.y * scale.y, du_dhuy * W_T_hy.y * scale.y, du_dhuz * W_T_hy.y * scale.y};
+			const float3 dv_dtu = { dv_dhux * W_T_hx.x * scale.x, dv_dhuy * W_T_hx.x * scale.x, dv_dhuz * W_T_hx.x * scale.x};
+			const float3 dv_dtv = { dv_dhux * W_T_hy.y * scale.y, dv_dhuy * W_T_hy.y * scale.y, dv_dhuz * W_T_hy.y * scale.y};
 
-			const float2 du_dscale = { W_T_hx.x * (tu.x * du_dhux + tu.y * du_dhuy), 
-									   W_T_hx.y * (tv.x * du_dhvx + tv.y * du_dhvy) };
-			const float2 dv_dscale = { W_T_hy.x * (tu.x * dv_dhux + tu.y * dv_dhuy), 
-									   W_T_hy.y * (tv.x * dv_dhvx + tv.y * dv_dhvy) };
+			const float2 du_dscale = { W_T_hx.x * (tu.x * du_dhux + tu.y * du_dhuy + tu.z * du_dhuz), 
+									   W_T_hx.y * (tv.x * du_dhvx + tv.y * du_dhvy + tv.z * du_dhvz) };
+			const float2 dv_dscale = { W_T_hy.x * (tu.x * dv_dhux + tu.y * dv_dhuy + tu.z * dv_dhuz), 
+									   W_T_hy.y * (tv.x * dv_dhvx + tv.y * dv_dhvy + tv.z * dv_dhvz) };
 
 			const float4 du_dr = { 		   			       du_dtu.y *   2.  * z - du_dtu.z * 2. * y,
-														   du_dtu.y *   2.  * y + du_dtu.z * 2 * z,
+														   du_dtu.y *   2.  * y + du_dtu.z * 2. * z,
 									du_dtu.x * (-4.) * y + du_dtu.y *   2.  * x - du_dtu.z * 2. * r,
 									du_dtu.x * (-4.) * z + du_dtu.y *   2.  * r + du_dtu.z * 2. * x };
 			const float4 dv_dr = {  dv_dtv.x * (-2.) * z + 						  dv_dtv.z * 2. * x,
