@@ -109,8 +109,8 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 
 	// Apply low-pass filter: every Gaussian should be at least
 	// one pixel wide/high. Discard 3rd row and column.
-	cov[0][0] += 0.3f;
-	cov[1][1] += 0.3f;
+	// cov[0][0] += 0.3f;
+	// cov[1][1] += 0.3f;
 	return { float(cov[0][0]), float(cov[0][1]), float(cov[1][1]) };
 }
 
@@ -420,10 +420,6 @@ renderCUDA(
 			// d = { xy.x - pixf.x, xy.y - pixf.y };
 			// float power_origin = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			
-			// Eq. (2) from 3D Gaussian splatting paper.
-			// Obtain alpha by multiplying with Gaussian opacity
-			// and its exponential falloff from mean.
-			// Avoid numerical instabilities (see paper appendix). 
 			float alpha = min(0.99f, o * exp(power)); //TODO: remove con_o and add opacities[idx]
 			if (alpha < 1.0f / 255.0f)
 				continue;
@@ -440,7 +436,7 @@ renderCUDA(
 
 			T = test_T;
 		
-			}
+			
 
 			// Keep track of last range entry to update this
 			// pixel.
