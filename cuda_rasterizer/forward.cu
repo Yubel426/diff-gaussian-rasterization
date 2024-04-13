@@ -11,6 +11,8 @@
 
 #include "forward.h"
 #include "auxiliary.h"
+#include <iostream>
+
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -224,7 +226,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	glm::mat4* WHs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	float4* conic_opacity)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -306,7 +309,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	points_xy_image[idx] = point_image;
 	WHs[idx] = WH;
 	// Inverse 2D covariance and opacity neatly pack into one float4
-	// conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
+	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
@@ -328,7 +331,8 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
-	float* __restrict__ out_color)
+	float* __restrict__ out_color,
+	float4* __restrict__ conic_opacity)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -338,6 +342,8 @@ renderCUDA(
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
 	float2 pixf = { (float)pix.x, (float)pix.y };
+	glm::vec4 h_x(-1.f, 0.f, 0.f, pix2Ndc(pixf.x,W)); 
+	glm::vec4 h_y(0.f, -1.f, 0.f, pix2Ndc(pixf.y,H));
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -354,6 +360,7 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
+	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -378,6 +385,7 @@ renderCUDA(
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_opacity[block.thread_rank()] = opacity[coll_id];
 			collected_WH[block.thread_rank()] = WHs[coll_id];
+			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 		}
 		block.sync();
 
@@ -392,10 +400,9 @@ renderCUDA(
 			float o = collected_opacity[j];
 			glm::mat4 WH = collected_WH[j];
 			float2 xy = collected_xy[j];
+			float4 con_o = collected_conic_opacity[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			// TODO: image coordinates to ndc coordinates?
-			glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
-			glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
 			// TODO: simplify this
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
@@ -403,13 +410,16 @@ renderCUDA(
 			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
 			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
-			float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
-
-			float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
+			// float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
+			
+			
+			// float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
 			if (power > 0.0f)
 				continue;
-			power = max(power, power_filter);
-
+			// power = max(power, power_filter);
+			// d = { xy.x - pixf.x, xy.y - pixf.y };
+			// power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
@@ -429,6 +439,27 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
 			T = test_T;
+			if (block.thread_rank()==0 && block.group_index().y == 0 &&block.group_index().x == 0){
+				printf("@@@@@@@@@j = %d@@@@@@@@@@\n",j);
+				printf("h_x = %f %f %f %f\n", h_x.x, h_x.y, h_x.z, h_x.w);
+				printf("WH = %f %f %f %f\n", WH[0][0], WH[0][1], WH[0][2], WH[0][3]);
+				printf("h_u = %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
+				printf("u_x = %f u_y = %f\n", u_x, u_y);	
+				printf("power = %f\n",power);
+				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
+			}
+			if (block.thread_rank()==4 && block.group_index().y == 0 && block.group_index().x == 0){
+				printf("@@@@@@@@@j = %d@@@@@@@@@@\n",j);
+				printf("h_x = %f %f %f %f\n", h_x.x, h_x.y, h_x.z, h_x.w);
+				printf("WH = %f %f %f %f\n", WH[0][0], WH[0][1], WH[0][2], WH[0][3]);
+				printf("h_u = %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
+				printf("u_x = %f u_y = %f\n", u_x, u_y);	
+				printf("power = %f \n",power);
+				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
+				printf("################################################\n");	
+	
+		
+			}
 
 			// Keep track of last range entry to update this
 			// pixel.
@@ -459,7 +490,8 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
-	float* out_color)
+	float* out_color,
+	float4* conic_opacity)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -472,7 +504,8 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		bg_color,
-		out_color);
+		out_color,
+		conic_opacity);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -499,7 +532,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	glm::mat4* WHs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	float4* conic_opacity)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
@@ -526,6 +560,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		WHs,
 		grid,
 		tiles_touched,
-		prefiltered
+		prefiltered,
+		conic_opacity
 		);
 }
