@@ -177,7 +177,8 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	// );
 	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y));
 	glm::vec3 t_v = glm::vec3(2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x));
-	glm::vec3 t_w = glm::cross(t_u, t_v); //TODO: normalize t_w?
+	glm::vec3 t_w = glm::normalize(glm::cross(t_u, t_v)); //TODO: normalize t_w?
+
 	glm::mat3 R = glm::mat3(t_u, t_v, t_w);
 	glm::mat3 RS = R * S;
 	glm::mat4 H;
@@ -342,8 +343,8 @@ renderCUDA(
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
 	float2 pixf = { (float)pix.x, (float)pix.y };
-	glm::vec4 h_x(-1.f, 0.f, 0.f, pix2Ndc(pixf.x,W)); 
-	glm::vec4 h_y(0.f, -1.f, 0.f, pix2Ndc(pixf.y,H));
+	glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
+	glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -407,18 +408,18 @@ renderCUDA(
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
 
-			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
-			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (h_u_vec.x * h_v_vec.y - h_u_vec.y * h_v_vec.x);
+			float u_x = (- h_u_vec.y * h_v_vec.z + h_u_vec.w * h_v_vec.y + h_u_vec.z * h_v_vec.y - h_u_vec.y * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float u_y = (- h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w - h_u_vec.z * h_v_vec.x + h_u_vec.x * h_v_vec.z) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
-			// float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
+			float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
 			
-			
-			// float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
+			float hu_u = h_u_vec.x * u_x + h_u_vec.y * u_y + h_u_vec.z + h_u_vec.w;
+			float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
 			if (power > 0.0f)
 				continue;
-			// power = max(power, power_filter);
-			// d = { xy.x - pixf.x, xy.y - pixf.y };
-			// power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			power = max(power, power_filter);
+			d = { xy.x - pixf.x, xy.y - pixf.y };
+			float power_origin = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
@@ -445,7 +446,9 @@ renderCUDA(
 				printf("WH = %f %f %f %f\n", WH[0][0], WH[0][1], WH[0][2], WH[0][3]);
 				printf("h_u = %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
 				printf("u_x = %f u_y = %f\n", u_x, u_y);	
+				printf("h_u*u = %f\n", hu_u);
 				printf("power = %f\n",power);
+				printf("power_filter = %f\n",power_filter);
 				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
 			}
 			if (block.thread_rank()==4 && block.group_index().y == 0 && block.group_index().x == 0){
@@ -454,7 +457,9 @@ renderCUDA(
 				printf("WH = %f %f %f %f\n", WH[0][0], WH[0][1], WH[0][2], WH[0][3]);
 				printf("h_u = %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
 				printf("u_x = %f u_y = %f\n", u_x, u_y);	
+				printf("h_u*u = %f\n", hu_u);
 				printf("power = %f \n",power);
+				printf("power_filter = %f\n",power_filter);
 				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
 				printf("################################################\n");	
 	
