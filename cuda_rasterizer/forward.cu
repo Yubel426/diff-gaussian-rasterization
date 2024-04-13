@@ -191,10 +191,10 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	H[1][3] = p.y;
 	H[2][3] = p.z;
 	H[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
-		projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
-		projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
-		projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
+	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[1], projmatrix[2], projmatrix[3],
+		projmatrix[4], projmatrix[5], projmatrix[6], projmatrix[7],
+		projmatrix[8], projmatrix[9], projmatrix[10], projmatrix[11],
+		projmatrix[12], projmatrix[13], projmatrix[14], projmatrix[15]);
 	glm::mat4 res = W * H;
 	return res;
 
