@@ -175,8 +175,8 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	// 	2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
 	// 	2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
 	// );
-	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y));
-	glm::vec3 t_v = glm::vec3(2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x));
+	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y + r * z), 2.f * (x * z - r * y));
+	glm::vec3 t_v = glm::vec3(2.f * (x * y - r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z + r * x));
 	glm::vec3 t_w = glm::normalize(glm::cross(t_u, t_v)); //TODO: normalize t_w?
 
 	glm::mat3 R = glm::mat3(t_u, t_v, t_w);

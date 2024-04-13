@@ -377,7 +377,7 @@ __global__ void preprocessCUDA(
 	// dL_mean3d -> dL_mean2d due to 3d->2d projection
 	const float4 p_hom = transformPoint4x4(dL_dmean, projmatrix);
 	const float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	dL_dmean2D[idx] = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+	dL_dmean2D[idx] = { p_hom.x * p_w, p_hom.y * p_w, 0. };
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
