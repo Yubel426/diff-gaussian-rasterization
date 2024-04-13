@@ -407,8 +407,8 @@ renderCUDA(
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
 
-			float u_x = (- h_u_vec.y * h_v_vec.z + h_u_vec.w * h_v_vec.y + h_u_vec.z * h_v_vec.y - h_u_vec.y * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
-			float u_y = (- h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w - h_u_vec.z * h_v_vec.x + h_u_vec.x * h_v_vec.z) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float u_x = (h_u_vec.z * h_v_vec.y + h_u_vec.w * h_v_vec.y - h_u_vec.y * h_v_vec.z - h_u_vec.y * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float u_y = (- h_u_vec.z * h_v_vec.x - h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w  + h_u_vec.x * h_v_vec.z) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
 			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
 			
