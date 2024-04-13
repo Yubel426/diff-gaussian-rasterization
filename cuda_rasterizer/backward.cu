@@ -521,8 +521,8 @@ renderCUDA(
 				projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
 				projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
 		
-			const glm::vec4 h_x(-1.f, 0.f, 0.f, pix.x); 
-			const glm::vec4 h_y(0.f, -1.f, 0.f, pix.y);
+			const glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
+			const glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
 			const glm::vec4 hu = glm::transpose(W * H) * h_x;
 			const glm::vec4 hv = glm::transpose(W * H) * h_y;
 
