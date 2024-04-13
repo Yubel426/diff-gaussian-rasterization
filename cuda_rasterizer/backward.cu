@@ -501,8 +501,8 @@ renderCUDA(
 			const float x = q.y;
 			const float y = q.z;
 			const float z = q.w;
-			const glm::vec3 tu = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y));
-			const glm::vec3 tv = glm::vec3(2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x));
+			const glm::vec3 tu = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y + r * z), 2.f * (x * z - r * y));
+			const glm::vec3 tv = glm::vec3(2.f * (x * y - r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z + r * x));
 			const glm::vec3 tw = glm::cross(tu, tv); //TODO: normalize t_w?
 			const glm::mat3 R = glm::mat3(tu, tv, tw);
 			const glm::mat3 RS = R * S;
@@ -516,10 +516,10 @@ renderCUDA(
 			H[1][3] = p.y;
 			H[2][3] = p.z;
 			H[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-			glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
-				projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
-				projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
-				projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
+			glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[1], projmatrix[2], projmatrix[3],
+				projmatrix[4], projmatrix[5], projmatrix[6], projmatrix[7],
+				projmatrix[8], projmatrix[9], projmatrix[10], projmatrix[11],
+				projmatrix[12], projmatrix[13], projmatrix[14], projmatrix[15]);
 		
 			const glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
 			const glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
@@ -528,9 +528,9 @@ renderCUDA(
 
 			// Compute blending values, as before.
 			const float o = collected_opacity[j];
-			const float u_num = - hu.y * hv.z + hu.w * hv.y + hu.z * hv.y - hu.y * hv.w;
-			const float v_num = - hu.w * hv.x + hu.x * hv.w - hu.z * hv.x + hu.x * hv.z;
-			const float denom = hu.x * hv.y - hu.y * hv.x;
+			const float u_num = hu.z * hv.y + hu.w * hv.y - hu.y * hv.z - hu.y * hv.w;
+			const float v_num = - hu.z * hv.x - hu.w * hv.x + hu.x * hv.w  + hu.x * hv.z;
+			const float denom = hu.y * hv.x - hu.x * hv.y;
 			const float u = u_num / denom;
 			const float v = v_num / denom;
 			const float power = -0.5f * (u * u + v * v);
@@ -576,7 +576,7 @@ renderCUDA(
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 
 			const float dL_du = o * dL_dalpha * G * (-u);
-			const float dL_dv = 0 * dL_dalpha * G * (-v);
+			const float dL_dv = o * dL_dalpha * G * (-v);
 
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w - hv.z) / denom - hv.x * u / denom;
@@ -588,52 +588,71 @@ renderCUDA(
 			const float du_dhvz = - hu.y / denom;
 			const float du_dhvw = - hu.y / denom;
 
-
 			const float dv_dhux = (hv.z + hv.w) / denom + hv.y * v / denom;
 			const float dv_dhuy = - hv.x * v / denom;
-			const float dv_dhuz = - hv.x * v / denom;
-			const float dv_dhuw = - hv.x * v / denom;
+			const float dv_dhuz = - hv.x / denom;
+			const float dv_dhuw = - hv.x / denom;
 
-			const float dv_dhvx = (-hu.w - hu.z) / denom - hu.y * u / denom;
-			const float dv_dhvy = hu.x * u / denom;
+			const float dv_dhvx = (-hu.w - hu.z) / denom - hu.y * v / denom;
+			const float dv_dhvy = hu.x * v / denom;
 			const float dv_dhvz = hu.x / denom;
 			const float dv_dhvw = hu.x / denom;
 
 			// dL_dhu -> dL_dcov3D, dL_mean3d
-			const glm::vec4 W_T_hx = glm::transpose(W) * glm::vec4(-1, 0, 0, pix.x);
-			const glm::vec4 W_T_hy = glm::transpose(W) * glm::vec4(0, -1, 0, pix.y);
+			const glm::vec4 W_T_hx = glm::transpose(W) * h_x;
+			const glm::vec4 W_T_hy = glm::transpose(W) * h_y;
 			
 			const float3 dhuw_dmean3d = { W_T_hx.x, W_T_hx.y, W_T_hx.z };
 			const float3 dhvw_dmean3d = { W_T_hy.x, W_T_hy.y, W_T_hy.z };
 
-			const float3 du_dtu = { du_dhux * W_T_hx.x * scale.x, du_dhuy * W_T_hx.x * scale.x, du_dhuz * W_T_hx.x * scale.x};
-			const float3 du_dtv = { du_dhux * W_T_hy.y * scale.y, du_dhuy * W_T_hy.y * scale.y, du_dhuz * W_T_hy.y * scale.y};
-			const float3 dv_dtu = { dv_dhux * W_T_hx.x * scale.x, dv_dhuy * W_T_hx.x * scale.x, dv_dhuz * W_T_hx.x * scale.x};
-			const float3 dv_dtv = { dv_dhux * W_T_hy.y * scale.y, dv_dhuy * W_T_hy.y * scale.y, dv_dhuz * W_T_hy.y * scale.y};
+			const float3 du_dtu = { du_dhux * W_T_hx.x * scale.x + du_dhvx * W_T_hy.x * scale.x, 
+									du_dhuy * W_T_hx.x * scale.x + du_dhvy * W_T_hy.x * scale.x, 
+									du_dhuz * W_T_hx.x * scale.x + du_dhvz * W_T_hy.x * scale.x};
+			const float3 du_dtv = { du_dhux * W_T_hx.y * scale.y + du_dhvx * W_T_hy.y * scale.y, 
+									du_dhuy * W_T_hx.y * scale.y + du_dhvy * W_T_hy.y * scale.y, 
+									du_dhuz * W_T_hx.y * scale.y + du_dhvz * W_T_hy.y * scale.y};
+			const float3 dv_dtu = { dv_dhux * W_T_hx.x * scale.x + dv_dhvx * W_T_hy.x * scale.x, 
+									dv_dhuy * W_T_hx.x * scale.x + dv_dhvy * W_T_hy.x * scale.x, 
+									dv_dhuz * W_T_hx.x * scale.x + dv_dhvz * W_T_hy.x * scale.x};
+			const float3 dv_dtv = { dv_dhux * W_T_hx.y * scale.y + dv_dhvx * W_T_hy.y * scale.y, 
+									dv_dhuy * W_T_hx.y * scale.y + dv_dhvy * W_T_hy.y * scale.y, 
+									dv_dhuz * W_T_hx.y * scale.y + dv_dhvz * W_T_hy.y * scale.y};
 
-			const float2 du_dscale = { W_T_hx.x * (tu.x * du_dhux + tu.y * du_dhuy + tu.z * du_dhuz), 
-									   W_T_hx.y * (tv.x * du_dhvx + tv.y * du_dhvy + tv.z * du_dhvz) };
-			const float2 dv_dscale = { W_T_hy.x * (tu.x * dv_dhux + tu.y * dv_dhuy + tu.z * dv_dhuz), 
-									   W_T_hy.y * (tv.x * dv_dhvx + tv.y * dv_dhvy + tv.z * dv_dhvz) };
+			const float2 du_dscale = { W_T_hx.x * (tu.x * du_dhux + tu.y * du_dhuy + tu.z * du_dhuz)
+									 + W_T_hy.x * (tu.x * du_dhvx + tu.y * du_dhvy + tu.z * du_dhvz), 
+									   W_T_hx.y * (tv.x * du_dhux + tv.y * du_dhuy + tv.z * du_dhuz)
+									 + W_T_hy.y * (tv.x * du_dhvx + tv.y * du_dhvy + tv.z * du_dhvz)};
+			const float2 dv_dscale = { W_T_hx.x * (tu.x * dv_dhux + tu.y * dv_dhuy + tu.z * dv_dhuz)
+									 + W_T_hy.x * (tu.x * dv_dhvx + tu.y * dv_dhvy + tu.z * dv_dhvz), 
+									   W_T_hx.y * (tv.x * dv_dhux + tv.y * dv_dhuy + tv.z * dv_dhuz)
+									 + W_T_hy.y * (tv.x * dv_dhvx + tv.y * dv_dhvy + tv.z * dv_dhvz)};
 
-			const float4 du_dr = { 		   			       du_dtu.y *   2.  * z - du_dtu.z * 2. * y,
-														   du_dtu.y *   2.  * y + du_dtu.z * 2. * z,
-									du_dtu.x * (-4.) * y + du_dtu.y *   2.  * x - du_dtu.z * 2. * r,
-									du_dtu.x * (-4.) * z + du_dtu.y *   2.  * r + du_dtu.z * 2. * x };
-			const float4 dv_dr = {  dv_dtv.x * (-2.) * z + 						  dv_dtv.z * 2. * x,
-									dv_dtv.x *   2.  * y - dv_dtv.y * (-4.) * x + dv_dtv.z * 2. * r,
-									dv_dtv.x *   2.  * x + 						  dv_dtv.z * 2. * z,
-									dv_dtv.x * (-2.) * r - dv_dtv.y * (-4.) * z + dv_dtv.z * 2. * y };
-
+			const float4 du_dr = { 		   			       du_dtu.y *   2.  * z - du_dtu.z * 2. * y
+								  +	du_dtv.x * (-2.) * z +                        du_dtv.z * 2. * x,
+														   du_dtu.y *   2.  * y + du_dtu.z * 2. * z
+								  + du_dtv.x *   2.  * y + du_dtv.y * (-4.) * x + du_dtv.z * 2. * r,
+									du_dtu.x * (-4.) * y + du_dtu.y *   2.  * x - du_dtu.z * 2. * r
+								  + du_dtv.x *   2.  * x + 						  du_dtv.z * 2. * z,
+									du_dtu.x * (-4.) * z + du_dtu.y *   2.  * r + du_dtu.z * 2. * x
+								  + du_dtv.x * (-2.) * r + du_dtv.y * (-4.) * z	+ du_dtv.z * 2. * y };
+			const float4 dv_dr = { 		   			       dv_dtu.y *   2.  * z - dv_dtu.z * 2. * y
+								  + dv_dtv.x * (-2.) * z +                        dv_dtv.z * 2. * x,
+								  						   dv_dtu.y *   2.  * y + dv_dtu.z * 2. * z
+								  + dv_dtv.x *   2.  * y + dv_dtv.y * (-4.) * x + dv_dtv.z * 2. * r,
+								  	dv_dtu.x * (-4.) * y + dv_dtu.y *   2.  * x - dv_dtu.z * 2. * r
+								  + dv_dtv.x *   2.  * x + 						  dv_dtv.z * 2. * z,
+								  	dv_dtu.x * (-4.) * z + dv_dtu.y *   2.  * r + dv_dtu.z * 2. * x
+								  + dv_dtv.x * (-2.) * r + dv_dtv.y * (-4.) * z	+ dv_dtv.z * 2. * y };
+  
 
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
-			atomicAdd(&dL_dmean3D[global_id].x, dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * du_dhvw * dhvw_dmean3d.x);
-			atomicAdd(&dL_dmean3D[global_id].y, dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * du_dhvw * dhvw_dmean3d.y);
-			atomicAdd(&dL_dmean3D[global_id].z, dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * du_dhvw * dhvw_dmean3d.z);
+			atomicAdd(&dL_dmean3D[global_id].x, dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
+			atomicAdd(&dL_dmean3D[global_id].y, dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
+			atomicAdd(&dL_dmean3D[global_id].z, dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
 			atomicAdd(&dL_dscales[global_id].x, du_dscale.x * dL_du + dv_dscale.x * dL_dv);
-			atomicAdd(&dL_dscales[global_id].y, du_dscale.y * dL_dv + dv_dscale.y * dL_dv);
+			atomicAdd(&dL_dscales[global_id].y, du_dscale.y * dL_du + dv_dscale.y * dL_dv);
 			atomicAdd(&dL_drot[global_id].x, du_dr.x * dL_du + dv_dr.x * dL_dv);
 			atomicAdd(&dL_drot[global_id].y, du_dr.y * dL_du + dv_dr.y * dL_dv);
 			atomicAdd(&dL_drot[global_id].z, du_dr.z * dL_du + dv_dr.z * dL_dv);
