@@ -43,7 +43,7 @@ __forceinline__ __device__ float ndc2Pix(float v, int S)
 	return ((v + 1.0) * S - 1.0) * 0.5;
 }
 
-__forceinline__ __device__ float pix2Ndc(float v, int S)
+__forceinline__ __device__ float Pix2ndc(float v, int S)
 {
 	return (2.0 * v + 1.0) / S - 1.0;
 }

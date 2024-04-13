@@ -403,23 +403,22 @@ renderCUDA(
 			float2 xy = collected_xy[j];
 			float4 con_o = collected_conic_opacity[j];
 			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
-			// TODO: image coordinates to ndc coordinates?
-			// TODO: simplify this
+
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
 
 			float u_x = (- h_u_vec.y * h_v_vec.z + h_u_vec.w * h_v_vec.y + h_u_vec.z * h_v_vec.y - h_u_vec.y * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float u_y = (- h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w - h_u_vec.z * h_v_vec.x + h_u_vec.x * h_v_vec.z) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
-			float2 d = { (pixf.x - xy.x) * std::sqrt(2.), (pixf.y - xy.y) * std::sqrt(2.) };
+			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
 			
 			float hu_u = h_u_vec.x * u_x + h_u_vec.y * u_y + h_u_vec.z + h_u_vec.w;
-			float power_filter = -0.5f * (d.x * d.x + d.y * d.y);
+			float power_filter = -0.125f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
 			if (power > 0.0f)
 				continue;
 			power = max(power, power_filter);
-			d = { xy.x - pixf.x, xy.y - pixf.y };
-			float power_origin = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			// d = { xy.x - pixf.x, xy.y - pixf.y };
+			// float power_origin = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
@@ -448,6 +447,7 @@ renderCUDA(
 				printf("u_x = %f u_y = %f\n", u_x, u_y);	
 				printf("h_u*u = %f\n", hu_u);
 				printf("power = %f\n",power);
+				printf("d = %f %f\n", d.x, d.y);
 				printf("power_filter = %f\n",power_filter);
 				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
 			}
@@ -459,6 +459,7 @@ renderCUDA(
 				printf("u_x = %f u_y = %f\n", u_x, u_y);	
 				printf("h_u*u = %f\n", hu_u);
 				printf("power = %f \n",power);
+				printf("d = %f %f\n", d.x, d.y);
 				printf("power_filter = %f\n",power_filter);
 				printf("C_0 = %f, C_1 = %f, C_2 = %f\n", C[0], C[1], C[2]);	
 				printf("################################################\n");	
