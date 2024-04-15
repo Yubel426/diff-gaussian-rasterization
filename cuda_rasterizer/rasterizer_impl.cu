@@ -251,7 +251,7 @@ int CudaRasterizer::Rasterizer::forward(
 		means3D,
 		(glm::vec3*)scales,
 		scale_modifier,
-		(glm::vec4*)rotations,
+		rotations,
 		opacities,
 		shs,
 		geomState.clamped,
@@ -403,7 +403,7 @@ void CudaRasterizer::Rasterizer::backward(
 		background,
 		geomState.means2D,
 		opacities,
-		(glm::vec4*)rotations,
+		rotations,
 		(glm::vec3*)scales,
 		scale_modifier,
 		projmatrix,
@@ -415,7 +415,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dcolor,
 		(float3*)dL_dmean3D,
 		(float3*)dL_dscale,
-		(float4*)dL_drot
+		dL_drot
 		), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
@@ -428,7 +428,7 @@ void CudaRasterizer::Rasterizer::backward(
 		shs,
 		geomState.clamped,
 		(glm::vec3*)scales,
-		(glm::vec4*)rotations,
+		rotations,
 		scale_modifier,
 		cov3D_ptr,
 		viewmatrix,
@@ -443,5 +443,5 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dcov3D,
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
-		(glm::vec4*)dL_drot), debug)
+		dL_drot), debug)
 }

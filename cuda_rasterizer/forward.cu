@@ -117,27 +117,34 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 // Forward method for converting scale and rotation properties of each
 // Gaussian to a 3D covariance matrix in world space. Also takes care
 // of quaternion normalization.
-__device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 rot, float* cov3D)
+__device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const float* rot, float* cov3D)
 {
 	// Create scaling matrix
 	glm::mat3 S = glm::mat3(1.0f);
 	S[0][0] = mod * scale.x;
 	S[1][1] = mod * scale.y;
-	S[2][2] = mod * scale.z;
+	S[2][2] = 0.0000001f;
 
 	// Normalize quaternion to get valid rotation
-	glm::vec4 q = rot;// / glm::length(rot);
-	float r = q.x;
-	float x = q.y;
-	float y = q.z;
-	float z = q.w;
+	// glm::vec4 q = rot;// / glm::length(rot);
+	// float r = q.x;
+	// float x = q.y;
+	// float y = q.z;
+	// float z = q.w;
 
-	// Compute rotation matrix from quaternion
-	glm::mat3 R = glm::mat3(
-		1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
-		2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
-		2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
-	);
+	// // Compute rotation matrix from quaternion
+	// glm::mat3 R = glm::mat3(
+	// 	1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
+	// 	2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
+	// 	2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
+	// );
+
+	glm::vec3 t_u = glm::vec3(rot[0 + 6 * idx], rot[1 + 6 * idx], rot[2 + 6 * idx]);
+	glm::vec3 t_v = glm::vec3(rot[3 + 6 * idx], rot[4 + 6 * idx], rot[5 + 6 * idx]);
+	glm::vec3 t_w = glm::normalize(glm::cross(t_u, t_v)); //TODO: normalize t_w?
+
+	glm::mat3 R = glm::mat3(t_u, t_v, t_w);
+
 
 	glm::mat3 M = S * R;
 
@@ -154,7 +161,7 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 }
 
 // compute WH matrix
-__device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4 rot, float3 p, const float* projmatrix)
+__device__ glm::mat4 computeWH(int idx, const glm::vec3 scale, float mod, const float* rot, float3 p, const float* projmatrix)
 {
 	// Create scaling matrix
 	glm::mat3 S = glm::mat3(1.0f);
@@ -163,11 +170,11 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	S[2][2] = 0.;
 
 	// Normalize quaternion to get valid rotation
-	glm::vec4 q = rot;// / glm::length(rot);
-	float r = q.x;
-	float x = q.y;
-	float y = q.z;
-	float z = q.w;
+	// glm::vec4 q = rot;// / glm::length(rot);
+	// float r = q.x;
+	// float x = q.y;
+	// float y = q.z;
+	// float z = q.w;
 
 	// Compute rotation matrix from quaternion
 	// glm::mat3 R = glm::mat3(
@@ -175,8 +182,8 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	// 	2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
 	// 	2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
 	// );
-	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y + r * z), 2.f * (x * z - r * y));
-	glm::vec3 t_v = glm::vec3(2.f * (x * y - r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z + r * x));
+	glm::vec3 t_u = glm::vec3(rot[0 + 6 * idx], rot[1 + 6 * idx], rot[2 + 6 * idx]);
+	glm::vec3 t_v = glm::vec3(rot[3 + 6 * idx], rot[4 + 6 * idx], rot[5 + 6 * idx]);
 	glm::vec3 t_w = glm::normalize(glm::cross(t_u, t_v)); //TODO: normalize t_w?
 
 	glm::mat3 R = glm::mat3(t_u, t_v, t_w);
@@ -207,7 +214,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float* orig_points, // P_k
 	const glm::vec3* scales, // S
 	const float scale_modifier,
-	const glm::vec4* rotations, // R
+	const float* rotations, // R
 	const float* opacities,
 	const float* shs,
 	bool* clamped,
@@ -247,7 +254,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// compute WH
 	//TODO: is proj world to screen matrix?
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
-	glm::mat4 WH = computeWH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
+	glm::mat4 WH = computeWH(idx, scales[idx], scale_modifier, rotations, p_orig, projmatrix);
 
 	// Transform point by projecting
 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
@@ -263,7 +270,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 	else
 	{
-		computeCov3D(scales[idx], scale_modifier, rotations[idx], cov3Ds + idx * 6);
+		computeCov3D(idx, scales[idx], scale_modifier, rotations, cov3Ds + idx * 6);
 		cov3D = cov3Ds + idx * 6;
 	}
 
@@ -489,7 +496,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float* means3D,
 	const glm::vec3* scales,
 	const float scale_modifier,
-	const glm::vec4* rotations,
+	const float* rotations,
 	const float* opacities,
 	const float* shs,
 	bool* clamped,
