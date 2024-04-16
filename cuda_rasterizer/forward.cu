@@ -194,17 +194,25 @@ __device__ glm::mat4 computeWH(int idx, const glm::vec3 scale, float mod, const 
 			H[i][j] = RS[i][j];
 		}
 	}
-	H[0][3] = p.x;
-	H[1][3] = p.y;
-	H[2][3] = p.z;
-	H[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[1], projmatrix[2], projmatrix[3],
-		projmatrix[4], projmatrix[5], projmatrix[6], projmatrix[7],
-		projmatrix[8], projmatrix[9], projmatrix[10], projmatrix[11],
-		projmatrix[12], projmatrix[13], projmatrix[14], projmatrix[15]);
+	H[0][3] = 0.;
+	H[1][3] = 0.;
+	H[2][3] = 0.;
+	H[3] = glm::vec4(p.x, p.y, p.z, 1.0f);
+	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
+		projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
+		projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
+		projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
 	glm::mat4 res = W * H;
 	return res;
 
+}
+__device__ glm::vec2 ComputeProjection(const glm::vec3 p_vec, const float* projmatrix, int W, int H)
+{
+	float3 p = { p_vec.x, p_vec.y, p_vec.z };
+	float4 p_hom = transformPoint4x4(p, projmatrix);
+	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+	glm::vec2 p_proj = { ndc2Pix(p_hom.x * p_w, W), ndc2Pix(p_hom.y * p_w, H) };
+	return p_proj;
 }
 
 // MARK: preprocess
@@ -252,7 +260,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		return;
 
 	// compute WH
-	//TODO: is proj world to screen matrix?
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 	glm::mat4 WH = computeWH(idx, scales[idx], scale_modifier, rotations, p_orig, projmatrix);
 
@@ -263,6 +270,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// If 3D covariance matrix is precomputed, use it, otherwise compute
 	// from scaling and rotation parameters. 
+
+	//TODO: remove cov3Ds and related code
 	const float* cov3D;
 	if (cov3D_precomp != nullptr)
 	{
@@ -414,18 +423,16 @@ renderCUDA(
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
 
-			float u_x = (h_u_vec.z * h_v_vec.y + h_u_vec.w * h_v_vec.y - h_u_vec.y * h_v_vec.z - h_u_vec.y * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
-			float u_y = (- h_u_vec.z * h_v_vec.x - h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w  + h_u_vec.x * h_v_vec.z) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u_x * u_x + u_y * u_y);
 			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
 			
 			float hu_u = h_u_vec.x * u_x + h_u_vec.y * u_y + h_u_vec.z + h_u_vec.w;
-			float power_filter = -0.125f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
+			float power_filter = -0.5f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
 			if (power > 0.0f)
 				continue;
-			power = max(power, power_filter);
-			// d = { xy.x - pixf.x, xy.y - pixf.y };
-			// float power_origin = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			// power = max(power, power_filter);
 			
 			float alpha = min(0.99f, o * exp(power)); //TODO: remove con_o and add opacities[idx]
 			if (alpha < 1.0f / 255.0f)
