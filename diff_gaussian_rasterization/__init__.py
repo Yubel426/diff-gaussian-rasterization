@@ -152,7 +152,9 @@ class _RasterizeGaussians(torch.autograd.Function):
             grad_cov3Ds_precomp,
             None,
         )
-
+        # torch.set_printoptions(precision=12)
+        # print("grad_scale: ", grad_scales)
+        # print("grad_rotations: ", grad_rotations)
         return grads
 
 class GaussianRasterizationSettings(NamedTuple):

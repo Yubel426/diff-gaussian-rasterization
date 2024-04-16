@@ -373,11 +373,17 @@ __global__ void preprocessCUDA(
 		return;
 
 	// Taking care of gradients from the screenspace points
-	float3 dL_dmean = {dL_dmeans[idx].x, dL_dmeans[idx].y, dL_dmeans[idx].z};
-	// dL_mean3d -> dL_mean2d due to 3d->2d projection
-	const float4 p_hom = transformPoint4x4(dL_dmean, projmatrix);
+	float3 mean3d = means[idx];
+	const float4 p_hom = transformPoint4x4(mean3d, projmatrix);
 	const float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	dL_dmean2D[idx] = { p_hom.x * p_w, p_hom.y * p_w, 0. };
+	const glm::vec3 mean2d = { p_hom.x * p_w, p_hom.y * p_w, 0. };
+
+	float3 mean3d_det = {dL_dmeans[idx].x + mean3d.x, dL_dmeans[idx].y + mean3d.y, dL_dmeans[idx].z + mean3d.z};
+	// dL_mean3d -> dL_mean2d due to 3d->2d projection
+	const float4 p_hom_det = transformPoint4x4(mean3d_det, projmatrix);
+	const float p_w_det = 1.0f / (p_hom_det.w + 0.0000001f);
+	const glm::vec3 mean2d_det = { p_hom_det.x * p_w_det, p_hom_det.y * p_w_det, 0. };
+	dL_dmean2D[idx] = { mean2d_det.x - mean2d.x, mean2d_det.y - mean2d.y, 0. };
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
@@ -456,7 +462,6 @@ renderCUDA(
 	if (inside)
 		for (int i = 0; i < C; i++)
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
-
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
 
@@ -579,12 +584,11 @@ renderCUDA(
 
 			const float dL_du = o * dL_dalpha * G * (-u);
 			const float dL_dv = o * dL_dalpha * G * (-v);
-
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w - hv.z) / denom - hv.x * u / denom;
 			const float du_dhuz = hv.y / denom;
 			const float du_dhuw = hv.y / denom;
-
+			// printf("du_dhux: %f, du_dhuy: %f, du_dhuz: %f, du_dhuw: %f\n", du_dhux, du_dhuy, du_dhuz, du_dhuw);
 			const float du_dhvx = - u * hu.y / denom;
 			const float du_dhvy = (hu.z + hu.w) / denom + hu.x * u / denom;
 			const float du_dhvz = - hu.y / denom;
@@ -603,7 +607,7 @@ renderCUDA(
 			// dL_dhu -> dL_dcov3D, dL_mean3d
 			const glm::vec4 W_T_hx = glm::transpose(W) * h_x;
 			const glm::vec4 W_T_hy = glm::transpose(W) * h_y;
-			
+			// printf("W_T_hx: %f, %f, %f, %f\n", W_T_hx.x, W_T_hx.y, W_T_hx.z, W_T_hx.w);
 			const float3 dhuw_dmean3d = { W_T_hx.x, W_T_hx.y, W_T_hx.z };
 			const float3 dhvw_dmean3d = { W_T_hy.x, W_T_hy.y, W_T_hy.z };
 
@@ -650,15 +654,17 @@ renderCUDA(
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+			// if(j==25){			
+			// 	printf("dL_dscales: %f %f\n", du_dscale.x * dL_du + dv_dscale.x * dL_dv, du_dscale.y * dL_du + dv_dscale.y * dL_dv);
+			// 	printf("dL_dmean3d: %f %f %f\n", dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x, dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y, dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
+			// 	printf("dL_drot: %f %f %f %f %f %f\n", du_dtu.x * dL_du + dv_dtu.x * dL_dv, du_dtu.y * dL_du + dv_dtu.y * dL_dv, du_dtu.z * dL_du + dv_dtu.z * dL_dv, du_dtv.x * dL_du + dv_dtv.x * dL_dv, du_dtv.y * dL_du + dv_dtv.y * dL_dv, du_dtv.z * dL_du + dv_dtv.z * dL_dv);
+			// }
+
 			atomicAdd(&dL_dmean3D[global_id].x, dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
 			atomicAdd(&dL_dmean3D[global_id].y, dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
 			atomicAdd(&dL_dmean3D[global_id].z, dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
 			atomicAdd(&dL_dscales[global_id].x, du_dscale.x * dL_du + dv_dscale.x * dL_dv);
 			atomicAdd(&dL_dscales[global_id].y, du_dscale.y * dL_du + dv_dscale.y * dL_dv);
-			// atomicAdd(&dL_drot[global_id].x, du_dr.x * dL_du + dv_dr.x * dL_dv);
-			// atomicAdd(&dL_drot[global_id].y, du_dr.y * dL_du + dv_dr.y * dL_dv);
-			// atomicAdd(&dL_drot[global_id].z, du_dr.z * dL_du + dv_dr.z * dL_dv);
-			// atomicAdd(&dL_drot[global_id].w, du_dr.w * dL_du + dv_dr.w * dL_dv);
 			atomicAdd(&dL_drot[6 * global_id + 0], du_dtu.x * dL_du + dv_dtu.x * dL_dv);
 			atomicAdd(&dL_drot[6 * global_id + 1], du_dtu.y * dL_du + dv_dtu.y * dL_dv);
 			atomicAdd(&dL_drot[6 * global_id + 2], du_dtu.z * dL_du + dv_dtu.z * dL_dv);
