@@ -29,7 +29,7 @@ namespace BACKWARD
 		const float* bg_color,
 		const float2* means2D,
 		const float* opacity,
-		const float* rotations,
+		const glm::vec4* rotations,
 		const glm::vec3* scales,
 		const float scale_modifier,
 		const float* projmatrix,
@@ -41,7 +41,7 @@ namespace BACKWARD
 		float* dL_dcolors,
 		float3* dL_dmean3D,
 		float3* dL_dscale,
-		float* dL_drot);
+		float4* dL_drot);
 
 	void preprocess(
 		int P, int D, int M,
@@ -50,7 +50,7 @@ namespace BACKWARD
 		const float* shs,
 		const bool* clamped,
 		const glm::vec3* scales,
-		const float* rotations,
+		const glm::vec4* rotations,
 		const float scale_modifier,
 		const float* cov3Ds,
 		const float* view,
@@ -65,7 +65,7 @@ namespace BACKWARD
 		float* dL_dcov3D,
 		float* dL_dsh,
 		glm::vec3* dL_dscale,
-		float* dL_drot);
+		glm::vec4* dL_drot);
 }
 
 #endif

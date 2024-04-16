@@ -27,7 +27,7 @@ namespace FORWARD
 		const float* orig_points,
 		const glm::vec3* scales,
 		const float scale_modifier,
-		const float* rotations,
+		const glm::vec4* rotations,
 		const float* opacities,
 		const float* shs,
 		bool* clamped,
