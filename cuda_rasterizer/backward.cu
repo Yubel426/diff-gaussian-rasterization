@@ -428,6 +428,8 @@ renderCUDA(
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	const uint32_t pix_id = W * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
+	const glm::vec4 h_x = {-1.0f, 0.f, 1.0f, pixf.x};
+	const glm::vec4 h_y = {0.f, -1.0f, 1.0f, pixf.y};
 
 	const bool inside = pix.x < W&& pix.y < H;
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
@@ -528,7 +530,6 @@ renderCUDA(
 				
 			const glm::vec4 hu = glm::transpose(W * H) * h_x;
 			const glm::vec4 hv = glm::transpose(W * H) * h_y;
-
 			// Compute blending values, as before.
 			const float o = collected_opacity[j];
 			const float u_num = hu.w * hv.y - hu.y * hv.w;
@@ -580,24 +581,26 @@ renderCUDA(
 
 			const float dL_du = o * dL_dalpha * G * (-u);
 			const float dL_dv = o * dL_dalpha * G * (-v);
+			// if (j==25 || global_id==12462)
+			// 	printf("o: %f, dL_dalpha: %f, G: %f\n", o, dL_dalpha, G);
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
-			const float du_dhuz = hv.y / denom;
+			// const float du_dhuz = hv.y / denom;
 			const float du_dhuw = hv.y / denom;
 			// printf("du_dhux: %f, du_dhuy: %f, du_dhuz: %f, du_dhuw: %f\n", du_dhux, du_dhuy, du_dhuz, du_dhuw);
 			const float du_dhvx = - u * hu.y / denom;
 			const float du_dhvy = (hu.w) / denom + hu.x * u / denom;
-			const float du_dhvz = - hu.y / denom;
+			// const float du_dhvz = - hu.y / denom;
 			const float du_dhvw = - hu.y / denom;
 
 			const float dv_dhux = (hv.w) / denom + hv.y * v / denom;
 			const float dv_dhuy = - hv.x * v / denom;
-			const float dv_dhuz = - hv.x / denom;
+			// const float dv_dhuz = - hv.x / denom;
 			const float dv_dhuw = - hv.x / denom;
 
 			const float dv_dhvx = (-hu.w) / denom - hu.y * v / denom;
 			const float dv_dhvy = hu.x * v / denom;
-			const float dv_dhvz = hu.x / denom;
+			// const float dv_dhvz = hu.x / denom;
 			const float dv_dhvw = hu.x / denom;
 
 			// dL_dhu -> dL_dcov3D, dL_mean3d
@@ -647,15 +650,15 @@ renderCUDA(
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
 
-			atomicAdd(&dL_dmean3D[global_id].x, dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
-			atomicAdd(&dL_dmean3D[global_id].y, dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
-			atomicAdd(&dL_dmean3D[global_id].z, dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
-			atomicAdd(&dL_dscales[global_id].x, du_dscale.x * dL_du + dv_dscale.x * dL_dv);
-			atomicAdd(&dL_dscales[global_id].y, du_dscale.y * dL_du + dv_dscale.y * dL_dv);
-			atomicAdd(&dL_drot[global_id].x, du_dr.x * dL_du + dv_dr.x * dL_dv);
-			atomicAdd(&dL_drot[global_id].y, du_dr.y * dL_du + dv_dr.y * dL_dv);
-			atomicAdd(&dL_drot[global_id].z, du_dr.z * dL_du + dv_dr.z * dL_dv);
-			atomicAdd(&dL_drot[global_id].w, du_dr.w * dL_du + dv_dr.w * dL_dv);
+			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
+			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
+			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
+			atomicAdd(&(dL_dscales[global_id].x), du_dscale.x * dL_du + dv_dscale.x * dL_dv);
+			atomicAdd(&(dL_dscales[global_id].y), du_dscale.y * dL_du + dv_dscale.y * dL_dv);
+			atomicAdd(&(dL_drot[global_id].x), du_dr.x * dL_du + dv_dr.x * dL_dv);
+			atomicAdd(&(dL_drot[global_id].y), du_dr.y * dL_du + dv_dr.y * dL_dv);
+			atomicAdd(&(dL_drot[global_id].z), du_dr.z * dL_du + dv_dr.z * dL_dv);
+			atomicAdd(&(dL_drot[global_id].w), du_dr.w * dL_du + dv_dr.w * dL_dv);
 		}
 	}
 }
