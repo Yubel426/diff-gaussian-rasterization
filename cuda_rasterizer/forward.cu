@@ -191,10 +191,10 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	H[1][3] = 0.;
 	H[2][3] = 0.;
 	H[3] = glm::vec4(p.x, p.y, p.z, 1.0f);
-	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
-		projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
-		projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
-		projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
+	glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[1], projmatrix[2], projmatrix[3],
+		projmatrix[4], projmatrix[5], projmatrix[6], projmatrix[7],
+		projmatrix[8], projmatrix[9], projmatrix[10], projmatrix[11],
+		projmatrix[12], projmatrix[13], projmatrix[14], projmatrix[15]);
 	glm::mat4 res = W * H;
 	return res;
 
@@ -352,8 +352,9 @@ renderCUDA(
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
 	float2 pixf = { (float)pix.x, (float)pix.y };
-	glm::vec4 h_x(-1.f, 0.f, 0.f, pixf.x); 
-	glm::vec4 h_y(0.f, -1.f, 0.f, pixf.y);
+	glm::vec4 h_x(-1.f, 0.f, 0.f, Pix2ndc(pixf.x,W)); 
+	glm::vec4 h_y(0.f, -1.f, 0.f, Pix2ndc(pixf.y,H));
+	// printf("W: %d, H: %d\n", W, H);
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -411,18 +412,21 @@ renderCUDA(
 			glm::mat4 WH = collected_WH[j];
 			float2 xy = collected_xy[j];
 			float4 con_o = collected_conic_opacity[j];
-			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
-
-			float u_x = (h_u_vec.y * h_v_vec.w - h_u_vec.w * h_v_vec.y) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
-			float u_y = (h_u_vec.w * h_v_vec.x - h_u_vec.x * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
-			float power = -0.5f * (u_x * u_x + u_y * u_y);
+			// if(j==50)
+			// 	printf("h_u_vec: %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
+			float u = (- h_u_vec.y * h_v_vec.w + h_u_vec.w * h_v_vec.y) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float v = (- h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float power = -0.5f * (u * u + v * v);
 			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
-			
-			float hu_u = h_u_vec.x * u_x + h_u_vec.y * u_y + h_u_vec.z + h_u_vec.w;
-			float power_filter = -0.5f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
+			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+
+			float hu_u = h_u_vec.x * u + h_u_vec.y * v + h_u_vec.w;
+			float hv_u = h_v_vec.x * u + h_v_vec.y * v + h_v_vec.w;
+			// printf("hu_u: %f, hv_u: %f\n", hu_u, hv_u);
+			// float power_filter = -0.5f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
 			if (power > 0.0f)
 				continue;
 			// power = max(power, power_filter);

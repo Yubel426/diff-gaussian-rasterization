@@ -428,8 +428,8 @@ renderCUDA(
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	const uint32_t pix_id = W * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
-	const glm::vec4 h_x = {-1.0f, 0.f, 1.0f, pixf.x};
-	const glm::vec4 h_y = {0.f, -1.0f, 1.0f, pixf.y};
+	const glm::vec4 h_x = {-1.0f, 0.f, 0.0f, Pix2ndc(pixf.x,1600)};
+	const glm::vec4 h_y = {0.f, -1.0f, 0.0f, Pix2ndc(pixf.y,1066)};
 
 	const bool inside = pix.x < W&& pix.y < H;
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
@@ -523,10 +523,10 @@ renderCUDA(
 			H[1][3] = 0.;
 			H[2][3] = 0.;
 			H[3] = glm::vec4(p.x, p.y, p.z, 1.0f);
-			glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[4], projmatrix[8], projmatrix[12],
-				projmatrix[1], projmatrix[5], projmatrix[9], projmatrix[13],
-				projmatrix[2], projmatrix[6], projmatrix[10], projmatrix[14],
-				projmatrix[3], projmatrix[7], projmatrix[11], projmatrix[15]);
+			glm::mat4 W = glm::mat4(projmatrix[0], projmatrix[1], projmatrix[2], projmatrix[3],
+				projmatrix[4], projmatrix[5], projmatrix[6], projmatrix[7],
+				projmatrix[8], projmatrix[9], projmatrix[10], projmatrix[11],
+				projmatrix[12], projmatrix[13], projmatrix[14], projmatrix[15]);
 				
 			const glm::vec4 hu = glm::transpose(W * H) * h_x;
 			const glm::vec4 hv = glm::transpose(W * H) * h_y;
