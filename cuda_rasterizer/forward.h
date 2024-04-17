@@ -58,12 +58,14 @@ namespace FORWARD
 		int W, int H,
 		const float2* points_xy_image,
 		const float* features,
+		const float* depths,
 		const float* opacity,
 		const glm::mat4* WHs,
 		float* final_T,
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,
+		float* out_median_depth,
 		float4* conic_opacity);
 }
 

@@ -335,12 +335,14 @@ renderCUDA(
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
+	const float* __restrict__ depths,
 	const float* __restrict__ opacity,
 	const glm::mat4* __restrict__ WHs,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
+	float* __restrict__ out_median_depth,
 	float4* __restrict__ conic_opacity)
 {
 	// Identify current tile and associated min/max pixel range.
@@ -370,12 +372,15 @@ renderCUDA(
 	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_depth[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
+	float D = { 0 };
+	float median_D = 0.0f;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -395,6 +400,7 @@ renderCUDA(
 			collected_opacity[block.thread_rank()] = opacity[coll_id]; //TODO: remove this line
 			collected_WH[block.thread_rank()] = WHs[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			collected_depth[block.thread_rank()] = depths[coll_id];
 		}
 		block.sync();
 
@@ -438,7 +444,13 @@ renderCUDA(
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
-
+			if (T > 0.5f && test_T < 0.5)
+				{
+					float dep = collected_depth[j];
+					median_D = dep;
+				}
+			if (median_D < 0.0001f)
+				median_D = collected_depth[j];
 			T = test_T;
 
 			// Keep track of last range entry to update this
@@ -453,6 +465,7 @@ renderCUDA(
 	{
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
+		out_median_depth[pix_id] = median_D;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 	}
@@ -465,12 +478,14 @@ void FORWARD::render(
 	int W, int H,
 	const float2* means2D,
 	const float* colors,
+	const float* depths,
 	const float* opacity,
 	const glm::mat4* WHs,
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
+	float* out_median_depth,
 	float4* conic_opacity)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
@@ -479,12 +494,14 @@ void FORWARD::render(
 		W, H,
 		means2D,
 		colors,
+		depths,
 		opacity,
 		WHs,
 		final_T,
 		n_contrib,
 		bg_color,
 		out_color,
+		out_median_depth,
 		conic_opacity);
 }
 
