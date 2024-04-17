@@ -17,6 +17,7 @@
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 
+//TODO: check if correct
 // Forward method for converting the input spherical harmonics
 // coefficients of each Gaussian to a simple RGB color.
 __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
@@ -170,11 +171,6 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	float z = q.w;
 
 	// Compute rotation matrix from quaternion
-	// glm::mat3 R = glm::mat3(
-	// 	1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
-	// 	2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
-	// 	2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
-	// );
 	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y + r * z), 2.f * (x * z - r * y));
 	glm::vec3 t_v = glm::vec3(2.f * (x * y - r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z + r * x));
 	glm::vec3 t_w = glm::normalize(glm::cross(t_u, t_v)); //TODO: normalize t_w?
@@ -199,6 +195,8 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	return res;
 
 }
+
+// func to compute myradius in 2DGS
 __device__ glm::vec2 ComputeProjection(const glm::vec3 p_vec, const float* projmatrix, int W, int H)
 {
 	float3 p = { p_vec.x, p_vec.y, p_vec.z };
@@ -264,6 +262,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// If 3D covariance matrix is precomputed, use it, otherwise compute
 	// from scaling and rotation parameters. 
 
+	//TODO: compute myradius in 2DGS
 	//TODO: remove cov3Ds and related code
 	const float* cov3D;
 	if (cov3D_precomp != nullptr)
@@ -354,7 +353,6 @@ renderCUDA(
 	float2 pixf = { (float)pix.x, (float)pix.y };
 	glm::vec4 h_x(-1.f, 0.f, 0.f, Pix2ndc(pixf.x,W)); 
 	glm::vec4 h_y(0.f, -1.f, 0.f, Pix2ndc(pixf.y,H));
-	// printf("W: %d, H: %d\n", W, H);
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -394,7 +392,7 @@ renderCUDA(
 			int coll_id = point_list[range.x + progress];
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
-			collected_opacity[block.thread_rank()] = opacity[coll_id];
+			collected_opacity[block.thread_rank()] = opacity[coll_id]; //TODO: remove this line
 			collected_WH[block.thread_rank()] = WHs[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 		}
@@ -415,23 +413,19 @@ renderCUDA(
 
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
-			// if(j==50)
-			// 	printf("h_u_vec: %f %f %f %f\n", h_u_vec.x, h_u_vec.y, h_u_vec.z, h_u_vec.w);
 			float u = (- h_u_vec.y * h_v_vec.w + h_u_vec.w * h_v_vec.y) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float v = (- h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float power = -0.5f * (u * u + v * v);
 			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
-			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 
 			float hu_u = h_u_vec.x * u + h_u_vec.y * v + h_u_vec.w;
 			float hv_u = h_v_vec.x * u + h_v_vec.y * v + h_v_vec.w;
-			// printf("hu_u: %f, hv_u: %f\n", hu_u, hv_u);
 			// float power_filter = -0.5f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
 			if (power > 0.0f)
 				continue;
 			// power = max(power, power_filter);
 			
-			float alpha = min(0.99f, o * exp(power)); //TODO: remove con_o and add opacities[idx]
+			float alpha = min(0.99f, o * exp(power)); 
 			if (alpha < 1.0f / 255.0f)
 				continue;
 			float test_T = T * (1 - alpha);
@@ -446,8 +440,6 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
 			T = test_T;
-		
-			
 
 			// Keep track of last range entry to update this
 			// pixel.
