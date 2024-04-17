@@ -66,6 +66,7 @@ namespace FORWARD
 		const float* bg_color,
 		float* out_color,
 		float* out_median_depth,
+		float* out_loss_dd,
 		float4* conic_opacity);
 }
 
