@@ -1,2 +1,6 @@
 # diff-gaussian-rasterization
-vanilla version
+TODO:
+- [ ] distortion loss
+- [x] normal consistency
+- [ ] mesh extraction
+- [ ] garngradients: mean3d -> mean2d

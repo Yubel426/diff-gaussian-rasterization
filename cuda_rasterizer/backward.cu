@@ -207,6 +207,7 @@ renderCUDA(
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ dL_dpixels,
+	const float* __restrict__ dL_dmedian_depth,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
 	float3* __restrict__ dL_dmean3D,
@@ -232,6 +233,7 @@ renderCUDA(
 
 	bool done = !inside;
 	int toDo = range.y - range.x;
+	bool nc = false;
 
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
@@ -289,6 +291,7 @@ renderCUDA(
 			if (contributor >= last_contributor)
 				continue;
 
+			//TODO: Move outside the loop: R, S, W, H
 			const glm::vec3 scale = collected_scale[j];
 			const glm::vec4 rot = collected_rot[j];
 			float3 p = collected_mean3d[j];
@@ -338,6 +341,20 @@ renderCUDA(
 			const float alpha = min(0.99f, o * G);
 			if (alpha < 1.0f / 255.0f)
 				continue;
+			// NC loss
+			//TODO: add last T remove bool nc
+			float dL_du_nc = 0.f;
+			float dL_dv_nc = 0.f;
+			if (j == 0 && T_final > 0.5f){
+				dL_du_nc = (W * H)[0][3] * dL_dmedian_depth[pix_id];
+				dL_dv_nc = (W * H)[1][3] * dL_dmedian_depth[pix_id];
+				nc = true;
+			}
+			if (T > 0.5f && !nc){
+				dL_du_nc = (W * H)[0][3] * dL_dmedian_depth[pix_id];
+				dL_dv_nc = (W * H)[1][3] * dL_dmedian_depth[pix_id];
+				nc = true;
+			}
 
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
@@ -345,6 +362,8 @@ renderCUDA(
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
 			// pair).
+
+
 			float dL_dalpha = 0.0f;
 			const int global_id = collected_id[j];
 			for (int ch = 0; ch < C; ch++)
@@ -372,8 +391,8 @@ renderCUDA(
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 
-			const float dL_du = o * dL_dalpha * G * (-u);
-			const float dL_dv = o * dL_dalpha * G * (-v);
+			const float dL_du = o * dL_dalpha * G * (-u) + dL_du_nc;
+			const float dL_dv = o * dL_dalpha * G * (-v) + dL_dv_nc;
 
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
@@ -514,6 +533,7 @@ void BACKWARD::render(
 	const float* final_Ts,
 	const uint32_t* n_contrib,
 	const float* dL_dpixels,
+	const float* dL_dmedian_depth,
 	float* dL_dopacity,
 	float* dL_dcolors,
 	float3* dL_dmean3D,
@@ -536,6 +556,7 @@ void BACKWARD::render(
 		final_Ts,
 		n_contrib,
 		dL_dpixels,
+		dL_dmedian_depth,
 		dL_dopacity,
 		dL_dcolors,
 		dL_dmean3D,
