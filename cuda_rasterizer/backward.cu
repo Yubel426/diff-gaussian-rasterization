@@ -343,8 +343,8 @@ renderCUDA(
 				continue;
 			// NC loss
 			//TODO: add last T remove bool nc
-			float dL_du_nc = 0.f;
-			float dL_dv_nc = 0.f;
+			float dL_du = 0.f;
+			float dL_dv = 0.f;
 			if (j == 0 && T_final > 0.5f){
 				dL_du_nc = ((W * H)[0][2] + (W * H)[0][3] + 
 							(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
@@ -355,10 +355,10 @@ renderCUDA(
 				nc = true;
 			}
 			if (T > 0.5f && !nc){
-				dL_du_nc = ((W * H)[0][2] + (W * H)[0][3] + 
-							(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
-							* dL_dmedian_depth[pix_id];
-				dL_dv_nc = ((W * H)[1][2] + (W * H)[1][3] + 
+				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
+						(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
+						* dL_dmedian_depth[pix_id];
+				dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
 							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
 							* dL_dmedian_depth[pix_id];
 				nc = true;
@@ -399,8 +399,8 @@ renderCUDA(
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 
-			const float dL_du = o * dL_dalpha * G * (-u) + dL_du_nc;
-			const float dL_dv = o * dL_dalpha * G * (-v) + dL_dv_nc;
+			dL_du += o * dL_dalpha * G * (-u);
+			dL_dv += o * dL_dalpha * G * (-v);
 
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
