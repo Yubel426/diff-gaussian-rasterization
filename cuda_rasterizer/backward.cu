@@ -353,7 +353,6 @@ renderCUDA(
 							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
 							* dL_dmedian_depth[pix_id];
 				nc = true;
-				printf("NC@@@ %f\n",dL_du_nc);
 			}
 			if (T > 0.5f && !nc){
 				dL_du_nc = ((W * H)[0][2] + (W * H)[0][3] + 
@@ -363,8 +362,6 @@ renderCUDA(
 							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
 							* dL_dmedian_depth[pix_id];
 				nc = true;
-				printf("NC!!!! %f\n",dL_du_nc);
-
 			}
 
 			T = T / (1.f - alpha);
