@@ -258,7 +258,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
-
 	// If 3D covariance matrix is precomputed, use it, otherwise compute
 	// from scaling and rotation parameters. 
 
@@ -426,6 +425,9 @@ renderCUDA(
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
 			float u = (- h_u_vec.y * h_v_vec.w + h_u_vec.w * h_v_vec.y) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
 			float v = (- h_u_vec.w * h_v_vec.x + h_u_vec.x * h_v_vec.w) / (- h_u_vec.x * h_v_vec.y + h_u_vec.y * h_v_vec.x);
+			float z_origin = (WH * glm::vec4(u, v, 1, 1)).z;
+			float z_ndc = (0.2 + 1000) / (1000 - 0.2) - 2 * 0.2 * 1000 / (1000 - 0.2) / z_origin;
+			
 			float power = -0.5f * (u * u + v * v);
 			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
 
@@ -451,16 +453,16 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 			if (T > 0.5f && test_T < 0.5)
 				{
-					float dep = collected_depth[j];
+					float dep = z_origin;
 					median_D = dep;
 				}
 			if (median_D < 0.0001f)
-				median_D = collected_depth[j];
-			l_dd += alpha * T * (A + D_1 + D_2);
+				median_D = z_origin;
+			l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
 			T = test_T;
 			A += alpha * T;
-			D_1 += alpha * T * collected_depth[j];
-			D_2 += alpha * T * collected_depth[j] * collected_depth[j];
+			D_1 += alpha * T * z_ndc;
+			D_2 += alpha * T * z_ndc * z_ndc;
 			// Keep track of last range entry to update this
 			// pixel.
 			last_contributor = contributor;
