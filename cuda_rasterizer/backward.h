@@ -40,6 +40,7 @@ namespace BACKWARD
 		const float* dL_dmedian_depth,
 		float* dL_dopacity,
 		float* dL_dcolors,
+		float3* dL_dmean2D,
 		float3* dL_dmean3D,
 		float3* dL_dscale,
 		float4* dL_drot);

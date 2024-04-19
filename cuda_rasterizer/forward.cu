@@ -430,9 +430,7 @@ renderCUDA(
 			
 			float power = -0.5f * (u * u + v * v);
 			float2 d = { Pix2ndc(pixf.x - xy.x,W) , Pix2ndc(pixf.y - xy.y,H) };
-			
 			float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
-			printf("power = %f power_filter = %f\n", power, power_filter);
 			power = max(power, power_filter);
 			
 			float alpha = min(0.99f, o * exp(power)); 

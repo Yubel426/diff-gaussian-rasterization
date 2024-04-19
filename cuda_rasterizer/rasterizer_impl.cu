@@ -420,6 +420,7 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dmedian_depth,
 		dL_dopacity,
 		dL_dcolor,
+		(float3*)dL_dmean2D,
 		(float3*)dL_dmean3D,
 		(float3*)dL_dscale,
 		(float4*)dL_drot

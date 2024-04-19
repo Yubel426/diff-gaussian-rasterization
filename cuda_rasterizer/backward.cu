@@ -180,13 +180,15 @@ __global__ void preprocessCUDA(
 	const float4 p_hom_det = transformPoint4x4(mean3d_det, projmatrix);
 	const float p_w_det = 1.0f / (p_hom_det.w + 0.0000001f);
 	const glm::vec3 mean2d_det = { p_hom_det.x * p_w_det, p_hom_det.y * p_w_det, 0. };
-	dL_dmean2D[idx] = { mean2d_det.x - mean2d.x, mean2d_det.y - mean2d.y, 0. };
+	dL_dmean2D[idx].x += mean2d_det.x - mean2d.x;
+	dL_dmean2D[idx].y += mean2d_det.y - mean2d.y;
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
 
 }
 
+//TODO: add Weight and Height
 // MARK: - Rendering
 // Backward version of the rendering procedure.
 template <uint32_t C>
@@ -197,7 +199,7 @@ renderCUDA(
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
 	const float* __restrict__ bg_color,
-	const float2* __restrict__ points_xy_image, // TODO: Remove
+	const float2* __restrict__ points_xy_image, 
 	const float* __restrict__ opacity,
 	const glm::vec4* rotations,
 	const glm::vec3* scales,
@@ -210,6 +212,7 @@ renderCUDA(
 	const float* __restrict__ dL_dmedian_depth,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
+	float3* __restrict__ dL_dmean2D,
 	float3* __restrict__ dL_dmean3D,
 	float3* __restrict__ dL_dscales,
 	float4* __restrict__ dL_drot
@@ -241,6 +244,7 @@ renderCUDA(
 	__shared__ float3 collected_mean3d[BLOCK_SIZE];
 	__shared__ glm::vec4 collected_rot[BLOCK_SIZE];
 	__shared__ glm::vec3 collected_scale[BLOCK_SIZE];
+	__shared__ float2 collected_xy[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -273,6 +277,7 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_opacity[block.thread_rank()] = opacity[coll_id];
 			collected_rot[block.thread_rank()] = rotations[coll_id];
+			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_scale[block.thread_rank()] = scales[coll_id];
 			collected_mean3d[block.thread_rank()] = means3D[coll_id];
 
@@ -287,9 +292,12 @@ renderCUDA(
 		{
 			// Keep track of current Gaussian ID. Skip, if this one
 			// is behind the last contributor for this pixel.
+			bool filter = false;
 			contributor--;
 			if (contributor >= last_contributor)
 				continue;
+
+			float2 xy = collected_xy[j];
 
 			//TODO: Move outside the loop: R, S, W, H
 			const glm::vec3 scale = collected_scale[j];
@@ -333,10 +341,17 @@ renderCUDA(
 			const float denom = hu.y * hv.x - hu.x * hv.y;
 			const float u = u_num / denom;
 			const float v = v_num / denom;
-			const float power = -0.5f * (u * u + v * v);
+			float power = -0.5f * (u * u + v * v);
 			if (power > 0.0f)
 				continue;
 
+			const float2 d = { Pix2ndc(xy.x- pixf.x, 1600) , Pix2ndc(xy.y - pixf.y, 1066) };
+			const float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
+			if (power_filter > power){
+				filter = true;
+				power = power_filter;
+			}
+			
 			const float G = exp(power);
 			const float alpha = min(0.99f, o * G);
 			if (alpha < 1.0f / 255.0f)
@@ -398,10 +413,14 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
-
-			dL_du += o * dL_dalpha * G * (-u);
-			dL_dv += o * dL_dalpha * G * (-v);
-
+			if (filter){
+				atomicAdd(&(dL_dmean2D[pix_id].x), o * dL_dalpha * G * 2 * d.x);
+				atomicAdd(&(dL_dmean2D[pix_id].y), o * dL_dalpha * G * 2 * d.y);
+			}
+			else{
+				dL_du += o * dL_dalpha * G * (-u);
+				dL_dv += o * dL_dalpha * G * (-v);	
+			}
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
 			const float du_dhuw = hv.y / denom;
@@ -544,6 +563,7 @@ void BACKWARD::render(
 	const float* dL_dmedian_depth,
 	float* dL_dopacity,
 	float* dL_dcolors,
+	float3* dL_dmean2D,
 	float3* dL_dmean3D,
 	float3* dL_dscales,
 	float4* dL_drot)
@@ -567,6 +587,7 @@ void BACKWARD::render(
 		dL_dmedian_depth,
 		dL_dopacity,
 		dL_dcolors,
+		dL_dmean2D,
 		dL_dmean3D,
 		dL_dscales,
 		dL_drot);
