@@ -429,14 +429,11 @@ renderCUDA(
 			float z_ndc = (0.2 + 1000) / (1000 - 0.2) - 2 * 0.2 * 1000 / (1000 - 0.2) / z_origin;
 			
 			float power = -0.5f * (u * u + v * v);
-			float2 d = { (pixf.x - xy.x) , (pixf.y - xy.y) };
-
-			float hu_u = h_u_vec.x * u + h_u_vec.y * v + h_u_vec.w;
-			float hv_u = h_v_vec.x * u + h_v_vec.y * v + h_v_vec.w;
-			// float power_filter = -0.5f * (d.x * d.x  + d.y * d.y); //TODO: it is not correct
-			if (power > 0.0f)
-				continue;
-			// power = max(power, power_filter);
+			float2 d = { Pix2ndc(pixf.x - xy.x,W) , Pix2ndc(pixf.y - xy.y,H) };
+			
+			float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
+			printf("power = %f power_filter = %f\n", power, power_filter);
+			power = max(power, power_filter);
 			
 			float alpha = min(0.99f, o * exp(power)); 
 			if (alpha < 1.0f / 255.0f)
