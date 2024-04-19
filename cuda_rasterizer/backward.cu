@@ -414,8 +414,8 @@ renderCUDA(
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 			if (filter){
-				atomicAdd(&(dL_dmean2D[pix_id].x), o * dL_dalpha * G * 2 * d.x);
-				atomicAdd(&(dL_dmean2D[pix_id].y), o * dL_dalpha * G * 2 * d.y);
+				atomicAdd(&(dL_dmean2D[global_id].x), o * dL_dalpha * G * 2 * d.x);
+				atomicAdd(&(dL_dmean2D[global_id].y), o * dL_dalpha * G * 2 * d.y);
 			}
 			else{
 				dL_du += o * dL_dalpha * G * (-u);
