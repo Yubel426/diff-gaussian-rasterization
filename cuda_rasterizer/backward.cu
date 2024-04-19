@@ -345,7 +345,7 @@ renderCUDA(
 			if (power > 0.0f)
 				continue;
 
-			const float2 d = { Pix2ndc(xy.x- pixf.x, 1600) , Pix2ndc(xy.y - pixf.y, 1066) };
+			const float2 d = { Pix2ndc(pixf.x - xy.x, 1600) , Pix2ndc(pixf.y - xy.y, 1066) };
 			const float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
 			if (power_filter > power){
 				filter = true;
@@ -360,24 +360,26 @@ renderCUDA(
 			//TODO: add last T remove bool nc
 			float dL_du = 0.f;
 			float dL_dv = 0.f;
-			if (j == 0 && T_final > 0.5f){
-				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
-						(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
-						* dL_dmedian_depth[pix_id];
-				dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
-							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
-							* dL_dmedian_depth[pix_id];
-				nc = true;
-			}
-			if (T > 0.5f && !nc){
-				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
-						(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
-						* dL_dmedian_depth[pix_id];
-				dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
-							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
-							* dL_dmedian_depth[pix_id];
-				nc = true;
-			}
+
+			// TODO: temporarily comment out
+			// if (j == 0 && T_final > 0.5f){
+			// 	dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
+			// 			(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
+			// 			* dL_dmedian_depth[pix_id];
+			// 	dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
+			// 				(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
+			// 				* dL_dmedian_depth[pix_id];
+			// 	nc = true;
+			// }
+			// if (T > 0.5f && !nc){
+			// 	dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
+			// 			(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
+			// 			* dL_dmedian_depth[pix_id];
+			// 	dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
+			// 				(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
+			// 				* dL_dmedian_depth[pix_id];
+			// 	nc = true;
+			// }
 
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
@@ -413,9 +415,16 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+			float3 dL_dmean = { 0.0f, 0.0f, 0.0f };
 			if (filter){
-				atomicAdd(&(dL_dmean2D[global_id].x), o * dL_dalpha * G * 2 * d.x);
-				atomicAdd(&(dL_dmean2D[global_id].y), o * dL_dalpha * G * 2 * d.y);
+				float4 p_hom = transformPoint4x4(p, projmatrix);
+				float p_w = 1.0f / (p_hom.w + 0.0000001f);
+				float2 dldmean2d = {o * dL_dalpha * G * 2 * d.x, o * dL_dalpha * G * 2 * d.y};
+				float mul1 = (projmatrix[0] * p.x + projmatrix[4] * p.y + projmatrix[8] * p.z + projmatrix[12]) * p_w * p_w;
+				float mul2 = (projmatrix[1] * p.x + projmatrix[5] * p.y + projmatrix[9] * p.z + projmatrix[13]) * p_w * p_w;
+				dL_dmean.x = (projmatrix[0] * p_w - projmatrix[3] * mul1) * dldmean2d.x + (projmatrix[1] * p_w - projmatrix[3] * mul2) * dldmean2d.y;
+				dL_dmean.y = (projmatrix[4] * p_w - projmatrix[7] * mul1) * dldmean2d.x + (projmatrix[5] * p_w - projmatrix[7] * mul2) * dldmean2d.y;
+				dL_dmean.z = (projmatrix[8] * p_w - projmatrix[11] * mul1) * dldmean2d.x + (projmatrix[9] * p_w - projmatrix[11] * mul2) * dldmean2d.y;
 			}
 			else{
 				dL_du += o * dL_dalpha * G * (-u);
@@ -482,9 +491,9 @@ renderCUDA(
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
-			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
-			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
-			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
+			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x + dL_dmean.x);
+			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y + dL_dmean.y);
+			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z + dL_dmean.z);
 			atomicAdd(&(dL_dscales[global_id].x), du_dscale.x * dL_du + dv_dscale.x * dL_dv);
 			atomicAdd(&(dL_dscales[global_id].y), du_dscale.y * dL_du + dv_dscale.y * dL_dv);
 			atomicAdd(&(dL_drot[global_id].x), du_dr.x * dL_du + dv_dr.x * dL_dv);

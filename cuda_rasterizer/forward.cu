@@ -432,7 +432,6 @@ renderCUDA(
 			float2 d = { Pix2ndc(pixf.x - xy.x,W) , Pix2ndc(pixf.y - xy.y,H) };
 			float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
 			power = max(power, power_filter);
-			
 			float alpha = min(0.99f, o * exp(power)); 
 			if (alpha < 1.0f / 255.0f)
 				continue;
