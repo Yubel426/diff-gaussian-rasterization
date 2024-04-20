@@ -180,8 +180,8 @@ __global__ void preprocessCUDA(
 	const float4 p_hom_det = transformPoint4x4(mean3d_det, projmatrix);
 	const float p_w_det = 1.0f / (p_hom_det.w + 0.0000001f);
 	const glm::vec3 mean2d_det = { p_hom_det.x * p_w_det, p_hom_det.y * p_w_det, 0. };
-	dL_dmean2D[idx].x += mean2d_det.x - mean2d.x;
-	dL_dmean2D[idx].y += mean2d_det.y - mean2d.y;
+	dL_dmean2D[idx].x = mean2d_det.x - mean2d.x;
+	dL_dmean2D[idx].y = mean2d_det.y - mean2d.y;
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
@@ -384,6 +384,10 @@ renderCUDA(
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
 
+			// dL_dzndc = 2.f * alpha * T * (A - D_1);
+			// dL_dw = D_2 + A * zndc * zndc - 2.f * zndc * D_1;
+
+
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
 			// pair).
@@ -415,21 +419,13 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
-			float3 dL_dmean = { 0.0f, 0.0f, 0.0f };
-			if (filter){
-				float4 p_hom = transformPoint4x4(p, projmatrix);
-				float p_w = 1.0f / (p_hom.w + 0.0000001f);
-				float2 dldmean2d = {o * dL_dalpha * G * 2 * d.x, o * dL_dalpha * G * 2 * d.y};
-				float mul1 = (projmatrix[0] * p.x + projmatrix[4] * p.y + projmatrix[8] * p.z + projmatrix[12]) * p_w * p_w;
-				float mul2 = (projmatrix[1] * p.x + projmatrix[5] * p.y + projmatrix[9] * p.z + projmatrix[13]) * p_w * p_w;
-				dL_dmean.x = (projmatrix[0] * p_w - projmatrix[3] * mul1) * dldmean2d.x + (projmatrix[1] * p_w - projmatrix[3] * mul2) * dldmean2d.y;
-				dL_dmean.y = (projmatrix[4] * p_w - projmatrix[7] * mul1) * dldmean2d.x + (projmatrix[5] * p_w - projmatrix[7] * mul2) * dldmean2d.y;
-				dL_dmean.z = (projmatrix[8] * p_w - projmatrix[11] * mul1) * dldmean2d.x + (projmatrix[9] * p_w - projmatrix[11] * mul2) * dldmean2d.y;
-			}
-			else{
-				dL_du += o * dL_dalpha * G * (-u);
-				dL_dv += o * dL_dalpha * G * (-v);	
-			}
+			// if (!filter){
+			// 	dL_du += o * dL_dalpha * G * (-u);
+			// 	dL_dv += o * dL_dalpha * G * (-v);	
+			// }
+			dL_du += o * dL_dalpha * G * (-u);
+			dL_dv += o * dL_dalpha * G * (-v);	
+
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
 			const float du_dhuw = hv.y / denom;
@@ -491,9 +487,9 @@ renderCUDA(
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
-			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x + dL_dmean.x);
-			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y + dL_dmean.y);
-			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z + dL_dmean.z);
+			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
+			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
+			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
 			atomicAdd(&(dL_dscales[global_id].x), du_dscale.x * dL_du + dv_dscale.x * dL_dv);
 			atomicAdd(&(dL_dscales[global_id].y), du_dscale.y * dL_du + dv_dscale.y * dL_dv);
 			atomicAdd(&(dL_drot[global_id].x), du_dr.x * dL_du + dv_dr.x * dL_dv);
