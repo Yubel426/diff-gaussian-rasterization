@@ -378,6 +378,7 @@ renderCUDA(
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
+	float last_depth = 0.0f;
 	float C[CHANNELS] = { 0 };
 	float D = { 0 };
 	float A = { 0 };
@@ -447,11 +448,8 @@ renderCUDA(
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 			if (T > 0.5f && test_T < 0.5)
 				{
-					float dep = z_origin;
-					median_D = dep;
+					median_D = z_origin;
 				}
-			if (median_D < 0.0001f)
-				median_D = z_origin;
 			l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
 			T = test_T;
 			A += alpha * T;
@@ -460,6 +458,7 @@ renderCUDA(
 			// Keep track of last range entry to update this
 			// pixel.
 			last_contributor = contributor;
+			last_depth = z_origin;
 		}
 	}
 
@@ -470,6 +469,8 @@ renderCUDA(
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
 		out_median_depth[pix_id] = median_D;
+		if (T > 0.5f)
+			out_median_depth[pix_id] = last_depth;
 		out_loss_dd[pix_id] = l_dd;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];

@@ -365,33 +365,28 @@ renderCUDA(
 			float dL_du = 0.f;
 			float dL_dv = 0.f;
 
-			// TODO: temporarily comment out
-			// if (j == 0 && T_final > 0.5f){
-			// 	dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
-			// 			(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
-			// 			* dL_dmedian_depth[pix_id];
-			// 	dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
-			// 				(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
-			// 				* dL_dmedian_depth[pix_id];
-			// 	nc = true;
-			// }
-			// if (T > 0.5f && !nc){
-			// 	dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
-			// 			(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
-			// 			* dL_dmedian_depth[pix_id];
-			// 	dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
-			// 				(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
-			// 				* dL_dmedian_depth[pix_id];
-			// 	nc = true;
-			// }
-
-			T = T / (1.f - alpha);
+			float test_T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
 
 			// dL_dzndc = 2.f * alpha * T * (A - D_1);
 			// dL_dw = D_2 + A * zndc * zndc - 2.f * zndc * D_1;
 
-
+			if (j == 0 && T_final > 0.5f){
+				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
+						(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
+						* dL_dmedian_depth[pix_id];
+				dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
+							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
+							* dL_dmedian_depth[pix_id];
+			}
+			if (test_T > 0.5f && T < 0.5){
+				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
+						(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
+						* dL_dmedian_depth[pix_id];
+				dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
+							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
+							* dL_dmedian_depth[pix_id];
+			}
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
 			// pair).
@@ -413,7 +408,8 @@ renderCUDA(
 				// many that were affected by this Gaussian.
 				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
 			}
-			dL_dalpha *= T;
+			dL_dalpha *= test_T;
+			T = test_T;
 			// Update last alpha (to be used in the next iteration)
 			last_alpha = alpha;
 
@@ -427,8 +423,6 @@ renderCUDA(
 				dL_du += o * dL_dalpha * G * (-u);
 				dL_dv += o * dL_dalpha * G * (-v);	
 			}
-			// dL_du += o * dL_dalpha * G * (-u);
-			// dL_dv += o * dL_dalpha * G * (-v);	
 
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
