@@ -322,7 +322,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 }
 
 // MARK: render
-// TODO: romve points_xy_image and related code
+// TODO: romve depths mage and related code
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
@@ -429,7 +429,7 @@ renderCUDA(
 			float z_ndc = (0.2 + 1000) / (1000 - 0.2) - 2 * 0.2 * 1000 / (1000 - 0.2) / z_origin;
 			
 			float power = -0.5f * (u * u + v * v);
-			float2 d = { Pix2ndc(pixf.x - xy.x,W) , Pix2ndc(pixf.y - xy.y,H) };
+			float2 d = { pixf.x - xy.x , pixf.y - xy.y };
 			float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
 			power = max(power, power_filter);
 			float alpha = min(0.99f, o * exp(power)); 

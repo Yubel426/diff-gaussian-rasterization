@@ -345,7 +345,7 @@ renderCUDA(
 			if (power > 0.0f)
 				continue;
 
-			const float2 d = { Pix2ndc(pixf.x - xy.x, 1600) , Pix2ndc(pixf.y - xy.y, 1066) };
+			const float2 d = { pixf.x - xy.x, pixf.y - xy.y};
 			const float power_filter = - (d.x * d.x  + d.y * d.y); //TODO: check if correct
 			if (power_filter > power){
 				filter = true;
@@ -419,12 +419,12 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
-			// if (!filter){
-			// 	dL_du += o * dL_dalpha * G * (-u);
-			// 	dL_dv += o * dL_dalpha * G * (-v);	
-			// }
-			dL_du += o * dL_dalpha * G * (-u);
-			dL_dv += o * dL_dalpha * G * (-v);	
+			if (!filter){
+				dL_du += o * dL_dalpha * G * (-u);
+				dL_dv += o * dL_dalpha * G * (-v);	
+			}
+			// dL_du += o * dL_dalpha * G * (-u);
+			// dL_dv += o * dL_dalpha * G * (-v);	
 
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
