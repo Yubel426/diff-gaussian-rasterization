@@ -171,17 +171,21 @@ __global__ void preprocessCUDA(
 	// Taking care of gradients from the screenspace points
 	//TODO: mean3d->mean2d is not correct
 	float3 mean3d = means[idx];
-	const float4 p_hom = transformPoint4x4(mean3d, projmatrix);
-	const float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	const glm::vec3 mean2d = { p_hom.x * p_w, p_hom.y * p_w, 0. };
+	// const float4 p_hom = transformPoint4x4(mean3d, projmatrix);
+	// const float p_w = 1.0f / (p_hom.w + 0.0000001f);
+	// const glm::vec3 mean2d = { p_hom.x * p_w, p_hom.y * p_w, 0. };
 
-	float3 mean3d_det = {dL_dmeans[idx].x + mean3d.x, dL_dmeans[idx].y + mean3d.y, dL_dmeans[idx].z + mean3d.z};
-	// dL_mean3d -> dL_mean2d due to 3d->2d projection
-	const float4 p_hom_det = transformPoint4x4(mean3d_det, projmatrix);
-	const float p_w_det = 1.0f / (p_hom_det.w + 0.0000001f);
-	const glm::vec3 mean2d_det = { p_hom_det.x * p_w_det, p_hom_det.y * p_w_det, 0. };
-	dL_dmean2D[idx].x = mean2d_det.x - mean2d.x;
-	dL_dmean2D[idx].y = mean2d_det.y - mean2d.y;
+	// float3 mean3d_det = {dL_dmeans[idx].x + mean3d.x, dL_dmeans[idx].y + mean3d.y, dL_dmeans[idx].z + mean3d.z};
+	// // dL_mean3d -> dL_mean2d due to 3d->2d projection
+	// const float4 p_hom_det = transformPoint4x4(mean3d_det, projmatrix);
+	// const float p_w_det = 1.0f / (p_hom_det.w + 0.0000001f);
+	// const glm::vec3 mean2d_det = { p_hom_det.x * p_w_det, p_hom_det.y * p_w_det, 0. };
+	// dL_dmean2D[idx].x = mean2d_det.x - mean2d.x;
+	// dL_dmean2D[idx].y = mean2d_det.y - mean2d.y;
+
+	dL_dmean2D[idx].x = dL_dmeans[idx].x * mean3d.z;
+	dL_dmean2D[idx].y = dL_dmeans[idx].y * mean3d.z;
+
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
