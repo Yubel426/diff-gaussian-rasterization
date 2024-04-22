@@ -212,8 +212,10 @@ renderCUDA(
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
+	const float3* __restrict__ ddas,
 	const float* __restrict__ dL_dpixels,
 	const float* __restrict__ dL_dmedian_depth,
+	const float* __restrict__ dL_dloss_dd,
 	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
 	float3* __restrict__ dL_dmean2D,
@@ -259,6 +261,7 @@ renderCUDA(
 	// Gaussian is known from each pixel from the forward.
 	uint32_t contributor = toDo;
 	const int last_contributor = inside ? n_contrib[pix_id] : 0;
+	float3 dda = ddas[pix_id];
 
 	float accum_rec[C] = { 0 };
 	float dL_dpixel[C];
@@ -267,7 +270,9 @@ renderCUDA(
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
-
+	float A = 0;
+	float D_1 = 0;
+	float D_2 = 0;
 	// Traverse all Gaussians
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
 	{
@@ -368,8 +373,15 @@ renderCUDA(
 			float test_T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
 
-			// dL_dzndc = 2.f * alpha * T * (A - D_1);
-			// dL_dw = D_2 + A * zndc * zndc - 2.f * zndc * D_1;
+			float z_origin = (W * H * glm::vec4(u, v, 1, 1)).z;
+			const float zndc = (0.2 + 1000) / (1000 - 0.2) - 2 * 0.2 * 1000 / (1000 - 0.2) / z_origin;
+			if (j == 0){
+				A = dda.z - alpha * test_T;
+				D_1 = dda.x - alpha * test_T * zndc;
+				D_2 = dda.y - alpha * test_T * zndc * zndc;
+			}
+			const float dL_dzndc = 2.f * alpha * test_T * (A - D_1) * dL_dloss_dd[pix_id];
+			const float dL_dw = (D_2 + A * zndc * zndc - 2.f * zndc * D_1) * dL_dloss_dd[pix_id];
 
 			if (j == 0 && T_final > 0.5f){
 				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
@@ -380,13 +392,21 @@ renderCUDA(
 							* dL_dmedian_depth[pix_id];
 			}
 			if (test_T > 0.5f && T < 0.5){
-				dL_du = ((W * H)[0][2] + (W * H)[0][3] + 
+				dL_du = ((W * H)[0][2] + 
 						(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
 						* dL_dmedian_depth[pix_id];
-				dL_dv = ((W * H)[1][2] + (W * H)[1][3] + 
+				dL_dv = ((W * H)[1][2] + 
 							(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
 							* dL_dmedian_depth[pix_id];
 			}
+			dL_du += ((W * H)[0][2] + (W * H)[0][3] + 
+					(W * H)[0][0] / Pix2ndc(pixf.x,1600) + (W * H)[0][1] / Pix2ndc(pixf.y,1066))
+					* -400 / 999.8 * dL_dzndc /z_origin / z_origin;
+			dL_dv += ((W * H)[1][2] + (W * H)[1][3] + 
+					(W * H)[1][0] / Pix2ndc(pixf.x,1600) + (W * H)[1][1] / Pix2ndc(pixf.y,1066))
+					* -400 / 999.8 * dL_dzndc /z_origin / z_origin;
+
+
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
 			// pair).
@@ -420,8 +440,8 @@ renderCUDA(
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
 			if (!filter){
-				dL_du += o * dL_dalpha * G * (-u);
-				dL_dv += o * dL_dalpha * G * (-v);	
+				dL_du += o * (dL_dalpha+dL_dw) * G * (-u);
+				dL_dv += o * (dL_dalpha+dL_dw) * G * (-v);	
 			}
 
 			const float du_dhux = u * hv.y / denom;
@@ -484,7 +504,7 @@ renderCUDA(
   
 
 			// Update gradients w.r.t. opacity of the Gaussian
-			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+			atomicAdd(&(dL_dopacity[global_id]), G * (dL_dalpha + dL_dw));
 			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dhuw * dhuw_dmean3d.x + dL_dv * dv_dhvw * dhvw_dmean3d.x);
 			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dhuw * dhuw_dmean3d.y + dL_dv * dv_dhvw * dhvw_dmean3d.y);
 			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dhuw * dhuw_dmean3d.z + dL_dv * dv_dhvw * dhvw_dmean3d.z);
@@ -562,8 +582,10 @@ void BACKWARD::render(
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
+	const float3* ddas,
 	const float* dL_dpixels,
 	const float* dL_dmedian_depth,
+	const float* dL_dloss_dd,
 	float* dL_dopacity,
 	float* dL_dcolors,
 	float3* dL_dmean2D,
@@ -586,8 +608,10 @@ void BACKWARD::render(
 		colors,
 		final_Ts,
 		n_contrib,
+		ddas,
 		dL_dpixels,
 		dL_dmedian_depth,
+		dL_dloss_dd,
 		dL_dopacity,
 		dL_dcolors,
 		dL_dmean2D,

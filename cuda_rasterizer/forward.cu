@@ -343,6 +343,7 @@ renderCUDA(
 	float* __restrict__ out_color,
 	float* __restrict__ out_median_depth,
 	float* __restrict__ out_loss_dd,
+	float3* __restrict__ out_dda,
 	float4* __restrict__ conic_opacity)
 {
 	// Identify current tile and associated min/max pixel range.
@@ -451,10 +452,10 @@ renderCUDA(
 					median_D = z_origin;
 				}
 			l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
-			T = test_T;
 			A += alpha * T;
 			D_1 += alpha * T * z_ndc;
 			D_2 += alpha * T * z_ndc * z_ndc;
+			T = test_T;
 			// Keep track of last range entry to update this
 			// pixel.
 			last_contributor = contributor;
@@ -472,6 +473,7 @@ renderCUDA(
 		if (T > 0.5f)
 			out_median_depth[pix_id] = last_depth;
 		out_loss_dd[pix_id] = l_dd;
+		out_dda[pix_id] = {D_1, D_2, A};
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 	}
@@ -493,6 +495,7 @@ void FORWARD::render(
 	float* out_color,
 	float* out_median_depth,
 	float* out_loss_dd,
+	float3* out_dda,
 	float4* conic_opacity)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
@@ -510,6 +513,7 @@ void FORWARD::render(
 		out_color,
 		out_median_depth,
 		out_loss_dd,
+		out_dda,
 		conic_opacity);
 }
 

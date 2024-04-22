@@ -67,6 +67,7 @@ namespace FORWARD
 		float* out_color,
 		float* out_median_depth,
 		float* out_loss_dd,
+		float3* out_dda,
 		float4* conic_opacity);
 }
 

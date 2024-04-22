@@ -176,6 +176,7 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	obtain(chunk, img.accum_alpha, N, 128);
 	obtain(chunk, img.n_contrib, N, 128);
 	obtain(chunk, img.ranges, N, 128);
+	obtain(chunk, img.dda, N, 128);
 	return img;
 }
 
@@ -339,6 +340,7 @@ int CudaRasterizer::Rasterizer::forward(
 		out_color,
 		out_median_depth,
 		out_loss_dd,
+		imgState.dda,
 		geomState.conic_opacity), debug)
 
 	return num_rendered;
@@ -369,6 +371,7 @@ void CudaRasterizer::Rasterizer::backward(
 	char* img_buffer,
 	const float* dL_dpix,
 	const float* dL_dmedian_depth,
+	const float* dL_dloss_dd,
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
@@ -416,8 +419,10 @@ void CudaRasterizer::Rasterizer::backward(
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
+		imgState.dda,
 		dL_dpix,
 		dL_dmedian_depth,
+		dL_dloss_dd,
 		dL_dopacity,
 		dL_dcolor,
 		(float3*)dL_dmean2D,
