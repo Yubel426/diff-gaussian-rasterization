@@ -261,13 +261,13 @@ renderCUDA(
 	// Gaussian is known from each pixel from the forward.
 	uint32_t contributor = toDo;
 	const int last_contributor = inside ? n_contrib[pix_id] : 0;
-	float3 dda = ddas[pix_id];
 
 	float accum_rec[C] = { 0 };
 	float dL_dpixel[C];
 	if (inside)
 		for (int i = 0; i < C; i++)
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+		float3 dda = ddas[pix_id];
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
 	float A = 0;
