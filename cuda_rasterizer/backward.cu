@@ -360,8 +360,8 @@ renderCUDA(
 			if (power > 0.0f)
 				continue;
 
-			const float2 d = { Pix2ndc(pixf.x - xy.x,Weight), Pix2ndc(pixf.y - xy.y,Height)};
-			const float power_filter = - 4. * (d.x * d.x  + d.y * d.y); //TODO: check if correct
+			const float2 d = {pixf.x - xy.x, pixf.y - xy.y};
+			const float power_filter = - 0.25 * (d.x * d.x  + d.y * d.y); //TODO: check if correct
 			if (power_filter > power){
 				filter = true;
 				power = power_filter;
