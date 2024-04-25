@@ -201,7 +201,7 @@ renderCUDA(
 	const uint2* __restrict__ ranges,
 	const float3* means3D,
 	const uint32_t* __restrict__ point_list,
-	int W, int H,
+	int Weight, int Height,
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image, 
 	const float* __restrict__ opacity,
@@ -227,16 +227,16 @@ renderCUDA(
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
-	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const uint32_t horizontal_blocks = (Weight + BLOCK_X - 1) / BLOCK_X;
 	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
-	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, Weight), min(pix_min.y + BLOCK_Y ,Height) };
 	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
-	const uint32_t pix_id = W * pix.y + pix.x;
+	const uint32_t pix_id = Weight * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
-	const glm::vec4 h_x = {-1.0f, 0.f, 0.0f, Pix2ndc(pixf.x,1600)};
-	const glm::vec4 h_y = {0.f, -1.0f, 0.0f, Pix2ndc(pixf.y,1066)};
+	const glm::vec4 h_x = {-1.0f, 0.f, 0.0f, Pix2ndc(pixf.x,Weight)};
+	const glm::vec4 h_y = {0.f, -1.0f, 0.0f, Pix2ndc(pixf.y,Height)};
 
-	const bool inside = pix.x < W&& pix.y < H;
+	const bool inside = pix.x < Weight&& pix.y < Height;
 	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
@@ -269,7 +269,7 @@ renderCUDA(
 	float dL_dmedian_depth;
 	if (inside){
 		for (int i = 0; i < C; i++)
-			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+			dL_dpixel[i] = dL_dpixels[i * Height * Weight + pix_id];
 		dda = ddas[pix_id];
 		dL_dmedian_depth = dL_dmedian_depths[pix_id];
 	}
@@ -360,7 +360,7 @@ renderCUDA(
 			if (power > 0.0f)
 				continue;
 
-			const float2 d = { Pix2ndc(pixf.x - xy.x,1600), Pix2ndc(pixf.y - xy.y,1066)};
+			const float2 d = { Pix2ndc(pixf.x - xy.x,Weight), Pix2ndc(pixf.y - xy.y,Height)};
 			const float power_filter = - 4. * (d.x * d.x  + d.y * d.y); //TODO: check if correct
 			if (power_filter > power){
 				filter = true;
