@@ -33,6 +33,7 @@ namespace BACKWARD
 		const glm::vec3* scales,
 		const float scale_modifier,
 		const float* projmatrix,
+		const float* viewmatrix,
 		const float* colors,
 		const float* final_Ts,
 		const uint32_t* n_contrib,
