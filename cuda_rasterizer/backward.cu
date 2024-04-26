@@ -183,13 +183,12 @@ __global__ void preprocessCUDA(
 	// dL_dmean2D[idx].x = mean2d_det.x - mean2d.x;
 	// dL_dmean2D[idx].y = mean2d_det.y - mean2d.y;
 
-	dL_dmean2D[idx].x = dL_dmeans[idx].x * mean3d.z;
-	dL_dmean2D[idx].y = dL_dmeans[idx].y * mean3d.z;
-
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
-
+	dL_dmean2D[idx].x = dL_dmeans[idx].x * mean3d.z;
+	dL_dmean2D[idx].y = dL_dmeans[idx].y * mean3d.z;
+	
 }
 
 //TODO: add Weight and Height
@@ -314,7 +313,6 @@ renderCUDA(
 
 			float2 xy = collected_xy[j];
 
-			//TODO: Move outside the loop: R, S, W, H
 			const glm::vec3 scale = collected_scale[j];
 			const glm::vec4 rot = collected_rot[j];
 			float3 p = collected_mean3d[j];
@@ -362,10 +360,10 @@ renderCUDA(
 
 			const float2 d = {pixf.x - xy.x, pixf.y - xy.y};
 			const float power_filter = - 0.25 * (d.x * d.x  + d.y * d.y); //TODO: check if correct
-			if (power_filter > power){
-				filter = true;
-				power = power_filter;
-			}
+			// if (power_filter > power){
+			// 	filter = true;
+			// 	power = power_filter;
+			// }
 			
 			const float G = exp(power);
 			const float alpha = min(0.99f, o * G);
@@ -378,8 +376,8 @@ renderCUDA(
 			float test_T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
 
-			float z_origin = (W * H * glm::vec4(u, v, 1, 1)).z;
-			const float zndc = (0.2 + 1000) / (1000 - 0.2) - 2 * 0.2 * 1000 / (1000 - 0.2) / z_origin;
+			float z_origin = (W * H * glm::vec4(u, v, 1, 1)).w;
+			float zndc = 1000 / (1000 - 0.2) - 0.2 * 1000 / (1000 - 0.2) / z_origin;
 			if (j == 0){
 				A = dda.z - alpha * test_T;
 				D_1 = dda.x - alpha * test_T * zndc;
@@ -387,16 +385,16 @@ renderCUDA(
 			}
 			const float dL_dzndc = 2.f * alpha * test_T * (A - D_1) * dL_dloss_dd[pix_id];
 			const float dL_dw = (D_2 + A * zndc * zndc - 2.f * zndc * D_1) * dL_dloss_dd[pix_id];
-			glm::vec3 dL_dp_view = {0,0,0};
+			glm::vec3 dL_dp = {0,0,0};
 			if (j == 0 && T_final > 0.5f){
-				dL_dp_view = {viewmatrix[2] * dL_dmedian_depth, viewmatrix[6] * dL_dmedian_depth, viewmatrix[10] * dL_dmedian_depth};
+				dL_dp = {viewmatrix[2] * dL_dmedian_depth, viewmatrix[6] * dL_dmedian_depth, viewmatrix[10] * dL_dmedian_depth};
 			}
 			//TODO: check if correct
 			if (test_T > 0.5f && T < 0.5){
-				dL_dp_view = {viewmatrix[2] * dL_dmedian_depth, viewmatrix[6] * dL_dmedian_depth, viewmatrix[10] * dL_dmedian_depth};
+				dL_dp = {viewmatrix[2] * dL_dmedian_depth, viewmatrix[6] * dL_dmedian_depth, viewmatrix[10] * dL_dmedian_depth};
 				}
 
-			// dL_dp_view = f(dL_dzndc);
+			// dL_dp = f(dL_dzndc);
 
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
@@ -505,7 +503,7 @@ renderCUDA(
 										RS[0][2] * du_dmean3d.x + RS[1][2] * dv_dmean3d.x,
 										RS[0][2] * du_dmean3d.y + RS[1][2] * dv_dmean3d.y,
 										RS[0][2] * du_dmean3d.z + RS[1][2] * dv_dmean3d.z + 1};
-			glm::vec3 dL_dmean3d = dp_view_dmean3d * dL_dp_view;
+			glm::vec3 dL_dmean3d = dp_view_dmean3d * dL_dp;
 								
 			glm::mat3 dp_view_dscale = {RS[0][0] * du_dscale.x + RS[1][0] * dv_dscale.x + R[0][0] * u,
 										RS[0][0] * du_dscale.y + RS[1][0] * dv_dscale.y + R[1][0] * v,
@@ -516,7 +514,7 @@ renderCUDA(
 										RS[0][2] * du_dscale.x + RS[1][2] * dv_dscale.x + R[0][2] * u,
 										RS[0][2] * du_dscale.y + RS[1][2] * dv_dscale.y + R[1][2] * v,
 										0};
-			glm::vec3 dL_dscale = dp_view_dscale * dL_dp_view;
+			glm::vec3 dL_dscale = dp_view_dscale * dL_dp;
 			// p_view (x,y,z) -> tu
 			glm::mat3 dp_view_dtu = {S[0][0] * u + RS[0][0] * du_dtu.x + RS[1][0] * dv_dtu.x,
 									RS[0][0] * du_dtu.y + RS[1][0] * dv_dtu.y,
@@ -527,7 +525,7 @@ renderCUDA(
 									S[2][2] * u + RS[0][2] * du_dtu.x + RS[1][2] * dv_dtu.x,
 									RS[0][2] * du_dtu.y + RS[1][2] * dv_dtu.y,
 									RS[0][2] * du_dtu.z + RS[1][2] * dv_dtu.z};
-			glm::vec3 dL_dtu = dp_view_dtu * dL_dp_view;
+			glm::vec3 dL_dtu = dp_view_dtu * dL_dp;
 			// p_view (x,y,z) -> tv1, tv2, tv3						 						
 			glm::mat3 dp_view_dtv = {RS[0][0] * du_dtv.x + S[1][0] * v + RS[1][0] * dv_dtv.x,
 									RS[0][0] * du_dtv.y + RS[1][0] * dv_dtv.y,
@@ -538,7 +536,7 @@ renderCUDA(
 									RS[0][2] * du_dtv.x + RS[1][2] * dv_dtv.x,
 									RS[0][2] * du_dtv.y + RS[1][2] * dv_dtv.y,
 									RS[0][2] * du_dtv.z + S[1][2] * v + RS[1][2] * dv_dtv.z};
-			glm::vec3 dL_dtv = dp_view_dtv * dL_dp_view;
+			glm::vec3 dL_dtv = dp_view_dtv * dL_dp;
 			const float4 dL_dr = { 		   			       dL_dtu.y *   2.  * z - dL_dtu.z * 2. * y
 				+	dL_dtv.x * (-2.) * z +                        dL_dtv.z * 2. * x,
 										 dL_dtu.y *   2.  * y + dL_dtu.z * 2. * z
