@@ -329,7 +329,6 @@ int CudaRasterizer::Rasterizer::forward(
 		width, height,
 		geomState.means2D,
 		feature_ptr,
-		geomState.depths,
 		opacities,
 		geomState.WHs,
 		imgState.accum_alpha,

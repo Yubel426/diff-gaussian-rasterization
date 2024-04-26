@@ -331,7 +331,6 @@ renderCUDA(
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
-	const float* __restrict__ depths,
 	const float* __restrict__ opacity,
 	const glm::mat4* __restrict__ WHs,
 	float* __restrict__ final_T,
@@ -368,8 +367,6 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
-	__shared__ float collected_depth[BLOCK_SIZE];
-	__shared__ glm::mat4 collected_H[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -377,10 +374,10 @@ renderCUDA(
 	uint32_t last_contributor = 0;
 	float last_depth = 0.0f;
 	float C[CHANNELS] = { 0 };
-	float D = { 0 };
-	float A = { 0 };
-	float D_1 = { 0 };
-	float D_2 = { 0 };
+	float D = 0.0f;
+	float A = 0.0f;
+	float D_1 = 0.0f;
+	float D_2 = 0.0f;
 	float median_D = 0.0f;
 	float l_dd = 0.0f;
 
@@ -399,9 +396,8 @@ renderCUDA(
 			int coll_id = point_list[range.x + progress];
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
-			collected_opacity[block.thread_rank()] = opacity[coll_id]; //TODO: remove this line
+			collected_opacity[block.thread_rank()] = opacity[coll_id];
 			collected_WH[block.thread_rank()] = WHs[coll_id];
-			collected_depth[block.thread_rank()] = depths[coll_id];
 		}
 		block.sync();
 
@@ -480,7 +476,6 @@ void FORWARD::render(
 	int W, int H,
 	const float2* means2D,
 	const float* colors,
-	const float* depths,
 	const float* opacity,
 	const glm::mat4* WHs,
 	float* final_T,
@@ -497,7 +492,6 @@ void FORWARD::render(
 		W, H,
 		means2D,
 		colors,
-		depths,
 		opacity,
 		WHs,
 		final_T,
