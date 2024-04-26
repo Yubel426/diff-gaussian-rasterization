@@ -195,41 +195,6 @@ __device__ glm::mat4 computeWH(const glm::vec3 scale, float mod, const glm::vec4
 	return res;
 
 }
-__device__ glm::mat4 computeH(const glm::vec3 scale, float mod, const glm::vec4 rot, float3 p, const float* projmatrix)
-{
-	// Create scaling matrix
-	glm::mat3 S = glm::mat3(1.0f);
-	S[0][0] = mod * scale.x;
-	S[1][1] = mod * scale.y;
-	S[2][2] = 0.;
-
-	// Normalize quaternion to get valid rotation
-	glm::vec4 q = rot;// / glm::length(rot);
-	float r = q.x;
-	float x = q.y;
-	float y = q.z;
-	float z = q.w;
-
-	// Compute rotation matrix from quaternion
-	glm::vec3 t_u = glm::vec3(1.f - 2.f * (y * y + z * z), 2.f * (x * y + r * z), 2.f * (x * z - r * y));
-	glm::vec3 t_v = glm::vec3(2.f * (x * y - r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z + r * x));
-	glm::vec3 t_w = glm::normalize(glm::cross(t_u, t_v));
-
-	glm::mat3 R = glm::mat3(t_u, t_v, t_w);
-	glm::mat3 RS = R * S;
-	glm::mat4 H;
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 3; j++) {
-			H[i][j] = RS[i][j];
-		}
-	}
-	H[0][3] = 0.;
-	H[1][3] = 0.;
-	H[2][3] = 0.;
-	H[3] = glm::vec4(p.x, p.y, p.z, 1.0f);
-	return H;
-
-}
 
 // func to compute myradius in 2DGS
 __device__ glm::vec2 ComputeProjection(const glm::vec3 p_vec, const float* projmatrix, int W, int H)
@@ -266,7 +231,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float* cov3Ds,
 	float* rgb,
 	glm::mat4* WHs,
-	glm::mat4* Hs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered)
@@ -289,7 +253,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 	// TODO: remove WH
 	glm::mat4 WH = computeWH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
-	glm::mat4 H_vec = computeH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
 	// Transform point by projecting
 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
@@ -351,7 +314,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
 	WHs[idx] = WH;
-	Hs[idx] = H_vec;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
@@ -367,13 +329,11 @@ renderCUDA(
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
-	const float* viewmatrix,
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
 	const float* __restrict__ depths,
 	const float* __restrict__ opacity,
 	const glm::mat4* __restrict__ WHs,
-	const glm::mat4* __restrict__ Hs,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
@@ -442,7 +402,6 @@ renderCUDA(
 			collected_opacity[block.thread_rank()] = opacity[coll_id]; //TODO: remove this line
 			collected_WH[block.thread_rank()] = WHs[coll_id];
 			collected_depth[block.thread_rank()] = depths[coll_id];
-			collected_H[block.thread_rank()] = Hs[coll_id];
 		}
 		block.sync();
 
@@ -457,7 +416,6 @@ renderCUDA(
 			float o = collected_opacity[j];
 			glm::mat4 WH = collected_WH[j];
 			float2 xy = collected_xy[j];
-			glm::mat4 H_mat = collected_H[j];
 
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
 			glm::vec4 h_v_vec = glm::transpose(WH) * h_y;
@@ -520,13 +478,11 @@ void FORWARD::render(
 	const uint2* ranges,
 	const uint32_t* point_list,
 	int W, int H,
-	const float* viewmatrix,
 	const float2* means2D,
 	const float* colors,
 	const float* depths,
 	const float* opacity,
 	const glm::mat4* WHs,
-	const glm::mat4* Hs,
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
@@ -539,13 +495,11 @@ void FORWARD::render(
 		ranges,
 		point_list,
 		W, H,
-		viewmatrix,
 		means2D,
 		colors,
 		depths,
 		opacity,
 		WHs,
-		Hs,
 		final_T,
 		n_contrib,
 		bg_color,
@@ -577,7 +531,6 @@ void FORWARD::preprocess(int P, int D, int M,
 	float* cov3Ds,
 	float* rgb,
 	glm::mat4* WHs,
-	glm::mat4* Hs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered)
@@ -605,7 +558,6 @@ void FORWARD::preprocess(int P, int D, int M,
 		cov3Ds,
 		rgb,
 		WHs,
-		Hs,
 		grid,
 		tiles_touched,
 		prefiltered
