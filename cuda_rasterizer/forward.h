@@ -48,8 +48,7 @@ namespace FORWARD
 		glm::mat4* Hs,
 		const dim3 grid,
 		uint32_t* tiles_touched,
-		bool prefiltered,
-		float4* conic_opacity);
+		bool prefiltered);
 
 	// Main rasterization method.
 	void render(
@@ -70,8 +69,7 @@ namespace FORWARD
 		float* out_color,
 		float* out_median_depth,
 		float* out_loss_dd,
-		float3* out_dda,
-		float4* conic_opacity);
+		float3* out_dda);
 }
 
 

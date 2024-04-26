@@ -269,8 +269,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	glm::mat4* Hs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered,
-	float4* conic_opacity)
+	bool prefiltered)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -288,6 +287,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// compute WH
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+	// TODO: remove WH
 	glm::mat4 WH = computeWH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
 	glm::mat4 H_vec = computeH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
 	// Transform point by projecting
@@ -346,7 +346,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Store some useful helper data for the next steps.
-	//TODO: remove conic_opacity and add opacities
 	//TODO: modify depths in 2DGS
 	depths[idx] = p_view.z;
 	radii[idx] = my_radius;
@@ -354,7 +353,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	WHs[idx] = WH;
 	Hs[idx] = H_vec;
 	// Inverse 2D covariance and opacity neatly pack into one float4
-	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
@@ -382,8 +380,7 @@ renderCUDA(
 	float* __restrict__ out_color,
 	float* __restrict__ out_median_depth,
 	float* __restrict__ out_loss_dd,
-	float3* __restrict__ out_dda,
-	float4* __restrict__ conic_opacity)
+	float3* __restrict__ out_dda)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -411,7 +408,6 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float collected_opacity[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_WH[BLOCK_SIZE];
-	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_depth[BLOCK_SIZE];
 	__shared__ glm::mat4 collected_H[BLOCK_SIZE];
 
@@ -445,7 +441,6 @@ renderCUDA(
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_opacity[block.thread_rank()] = opacity[coll_id]; //TODO: remove this line
 			collected_WH[block.thread_rank()] = WHs[coll_id];
-			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 			collected_depth[block.thread_rank()] = depths[coll_id];
 			collected_H[block.thread_rank()] = Hs[coll_id];
 		}
@@ -462,7 +457,6 @@ renderCUDA(
 			float o = collected_opacity[j];
 			glm::mat4 WH = collected_WH[j];
 			float2 xy = collected_xy[j];
-			float4 con_o = collected_conic_opacity[j];
 			glm::mat4 H_mat = collected_H[j];
 
 			glm::vec4 h_u_vec = glm::transpose(WH) * h_x;
@@ -539,8 +533,7 @@ void FORWARD::render(
 	float* out_color,
 	float* out_median_depth,
 	float* out_loss_dd,
-	float3* out_dda,
-	float4* conic_opacity)
+	float3* out_dda)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -559,8 +552,7 @@ void FORWARD::render(
 		out_color,
 		out_median_depth,
 		out_loss_dd,
-		out_dda,
-		conic_opacity);
+		out_dda);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -588,8 +580,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	glm::mat4* Hs,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered,
-	float4* conic_opacity)
+	bool prefiltered)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
@@ -617,7 +608,6 @@ void FORWARD::preprocess(int P, int D, int M,
 		Hs,
 		grid,
 		tiles_touched,
-		prefiltered,
-		conic_opacity
+		prefiltered
 		);
 }
