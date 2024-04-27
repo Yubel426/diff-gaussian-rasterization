@@ -359,7 +359,7 @@ renderCUDA(
 				continue;
 
 			const float2 d = {pixf.x - xy.x, pixf.y - xy.y};
-			const float power_filter = - 0.25 * (d.x * d.x  + d.y * d.y); //TODO: check if correct
+			const float power_filter = - (d.x * d.x  + d.y * d.y);
 			// if (power_filter > power){
 			// 	filter = true;
 			// 	power = power_filter;
