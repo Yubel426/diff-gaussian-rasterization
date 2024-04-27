@@ -251,7 +251,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// compute WH
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
-	// TODO: remove WH
 	glm::mat4 WH = computeWH(scales[idx], scale_modifier, rotations[idx], p_orig, projmatrix);
 	// Transform point by projecting
 	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
@@ -281,8 +280,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float det = (cov.x * cov.z - cov.y * cov.y);
 	if (det == 0.0f)
 		return;
-	float det_inv = 1.f / det;
-	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
 
 	// Compute extent in screen space (by finding eigenvalues of
 	// 2D covariance matrix). Use extent to compute a bounding rectangle
@@ -309,7 +306,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Store some useful helper data for the next steps.
-	//TODO: modify depths in 2DGS
 	depths[idx] = p_view.z;
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
@@ -319,7 +315,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 }
 
 // MARK: render
-// TODO: romve depths mage and related code
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
@@ -441,10 +436,10 @@ renderCUDA(
 				{
 					median_D = z_origin;
 				}
-			l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
-			A += alpha * T;
-			D_1 += alpha * T * z_ndc;
-			D_2 += alpha * T * z_ndc * z_ndc;
+			// l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
+			// A += alpha * T;
+			// D_1 += alpha * T * z_ndc;
+			// D_2 += alpha * T * z_ndc * z_ndc;
 			T = test_T;
 			// Keep track of last range entry to update this
 			// pixel.

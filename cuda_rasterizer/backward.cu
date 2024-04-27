@@ -169,19 +169,7 @@ __global__ void preprocessCUDA(
 		return;
 
 	// Taking care of gradients from the screenspace points
-	//TODO: mean3d->mean2d is not correct
 	float3 mean3d = means[idx];
-	// const float4 p_hom = transformPoint4x4(mean3d, projmatrix);
-	// const float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	// const glm::vec3 mean2d = { p_hom.x * p_w, p_hom.y * p_w, 0. };
-
-	// float3 mean3d_det = {dL_dmeans[idx].x + mean3d.x, dL_dmeans[idx].y + mean3d.y, dL_dmeans[idx].z + mean3d.z};
-	// // dL_mean3d -> dL_mean2d due to 3d->2d projection
-	// const float4 p_hom_det = transformPoint4x4(mean3d_det, projmatrix);
-	// const float p_w_det = 1.0f / (p_hom_det.w + 0.0000001f);
-	// const glm::vec3 mean2d_det = { p_hom_det.x * p_w_det, p_hom_det.y * p_w_det, 0. };
-	// dL_dmean2D[idx].x = mean2d_det.x - mean2d.x;
-	// dL_dmean2D[idx].y = mean2d_det.y - mean2d.y;
 
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
@@ -344,9 +332,12 @@ renderCUDA(
 				projmatrix[4], projmatrix[5], projmatrix[6], projmatrix[7],
 				projmatrix[8], projmatrix[9], projmatrix[10], projmatrix[11],
 				projmatrix[12], projmatrix[13], projmatrix[14], projmatrix[15]);
-				
-			const glm::vec4 hu = glm::transpose(W * H) * h_x;
-			const glm::vec4 hv = glm::transpose(W * H) * h_y;
+
+			const glm::vec4 W_T_hx = glm::transpose(W) * h_x;
+			const glm::vec4 W_T_hy = glm::transpose(W) * h_y;
+	
+			const glm::vec4 hu = glm::transpose(H) * W_T_hx;
+			const glm::vec4 hv = glm::transpose(H) * W_T_hy;
 			// Compute blending values, as before.
 			const float o = collected_opacity[j];
 			const float u_num = hu.w * hv.y - hu.y * hv.w;
@@ -360,10 +351,10 @@ renderCUDA(
 
 			const float2 d = {pixf.x - xy.x, pixf.y - xy.y};
 			const float power_filter = - (d.x * d.x  + d.y * d.y);
-			// if (power_filter > power){
-			// 	filter = true;
-			// 	power = power_filter;
-			// }
+			if (power_filter > power){
+				filter = true;
+				power = power_filter;
+			}
 			
 			const float G = exp(power);
 			const float alpha = min(0.99f, o * G);
@@ -394,7 +385,7 @@ renderCUDA(
 				dL_dp = {viewmatrix[2] * dL_dmedian_depth, viewmatrix[6] * dL_dmedian_depth, viewmatrix[10] * dL_dmedian_depth};
 				}
 
-			// dL_dp = f(dL_dzndc);
+			dL_dp += dL_dzndc * 0.2 * 1000 / (1000 - 0.2) / z_origin / z_origin;
 
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
@@ -428,10 +419,12 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
+
 			if (!filter){
 				dL_du += o * (dL_dalpha+dL_dw) * G * (-u);
 				dL_dv += o * (dL_dalpha+dL_dw) * G * (-v);	
 			}
+			
 
 			const float du_dhux = u * hv.y / denom;
 			const float du_dhuy = (- hv.w ) / denom - hv.x * u / denom;
@@ -451,49 +444,35 @@ renderCUDA(
 
 			// dL_dhu -> dL_dcov3D, dL_mean3d
 			//TODO: modify to matrix form
-			const glm::vec4 W_T_hx = glm::transpose(W) * h_x;
-			const glm::vec4 W_T_hy = glm::transpose(W) * h_y;
+			const glm::vec3 W_T_hx3 = { S[0][0] * W_T_hx.x,S[0][0] *  W_T_hx.y,S[0][0] * W_T_hx.z };
+			const glm::vec3 W_T_hy3 = { S[1][1] * W_T_hy.x, S[1][1] * W_T_hy.y, S[1][1] * W_T_hy.z };
 			const float3 dhuw_dmean3d = { W_T_hx.x, W_T_hx.y, W_T_hx.z };
 			const float3 dhvw_dmean3d = { W_T_hy.x, W_T_hy.y, W_T_hy.z };
 
-			const float3 du_dtu = { W_T_hx.x * S[0][0] * du_dhux + W_T_hy.x * S[1][1] * du_dhvx, 
-									W_T_hx.y * S[0][0] * du_dhux + W_T_hy.y * S[1][1] * du_dhvx,
-									W_T_hx.z * S[0][0] * du_dhux + W_T_hy.z * S[1][1] * du_dhvx};
-			const float3 du_dtv = { W_T_hx.x * S[0][0] * du_dhuy + W_T_hy.x * S[1][1] * du_dhvy, 
-									W_T_hx.y * S[0][0] * du_dhuy + W_T_hy.y * S[1][1] * du_dhvy,
-									W_T_hx.z * S[0][0] * du_dhuy + W_T_hy.z * S[1][1] * du_dhvy};
-			const float3 dv_dtu = { W_T_hx.x * S[0][0] * dv_dhux + W_T_hy.x * S[1][1] * dv_dhvx, 
-									W_T_hx.y * S[0][0] * dv_dhux + W_T_hy.y * S[1][1] * dv_dhvx,
-									W_T_hx.z * S[0][0] * dv_dhux + W_T_hy.z * S[1][1] * dv_dhvx};
-			const float3 dv_dtv = { W_T_hx.x * S[0][0] * dv_dhuy + W_T_hy.x * S[1][1] * dv_dhvy, 
-									W_T_hx.y * S[0][0] * dv_dhuy + W_T_hy.y * S[1][1] * dv_dhvy,
-									W_T_hx.z * S[0][0] * dv_dhuy + W_T_hy.z * S[1][1] * dv_dhvy};
+			const glm::vec3 du_dtu = du_dhux * W_T_hx3 + du_dhvx * W_T_hy3;
+			const glm::vec3 du_dtv = du_dhuy * W_T_hx3 + du_dhvy * W_T_hy3;
+			const glm::vec3 dv_dtu = dv_dhux * W_T_hx3 + dv_dhvx * W_T_hy3;
+			const glm::vec3 dv_dtv = dv_dhuy * W_T_hx3 + dv_dhvy * W_T_hy3;
 
 			const float2 du_dscale = { du_dhux * (W_T_hx.x * tu.x + W_T_hx.y * tu.y + W_T_hx.z * tu.z) + du_dhvx * (W_T_hy.x * tu.x + W_T_hy.y * tu.y + W_T_hy.z * tu.z), 
 									   du_dhuy * (W_T_hx.x * tu.x + W_T_hx.y * tu.y + W_T_hx.z * tu.z) + du_dhvy * (W_T_hy.x * tu.x + W_T_hy.y * tu.y + W_T_hy.z * tu.z)};
 			const float2 dv_dscale = { dv_dhux * (W_T_hx.x * tv.x + W_T_hx.y * tv.y + W_T_hx.z * tv.z) + dv_dhvx * (W_T_hy.x * tv.x + W_T_hy.y * tv.y + W_T_hy.z * tv.z), 
 									   dv_dhuy * (W_T_hx.x * tv.x + W_T_hx.y * tv.y + W_T_hx.z * tv.z) + dv_dhvy * (W_T_hy.x * tv.x + W_T_hy.y * tv.y + W_T_hy.z * tv.z)};
-
-			const float4 du_dr = { 		   			       du_dtu.y *   2.  * z - du_dtu.z * 2. * y
-								  +	du_dtv.x * (-2.) * z +                        du_dtv.z * 2. * x,
-														   du_dtu.y *   2.  * y + du_dtu.z * 2. * z
-								  + du_dtv.x *   2.  * y + du_dtv.y * (-4.) * x + du_dtv.z * 2. * r,
-									du_dtu.x * (-4.) * y + du_dtu.y *   2.  * x - du_dtu.z * 2. * r
-								  + du_dtv.x *   2.  * x + 						  du_dtv.z * 2. * z,
-									du_dtu.x * (-4.) * z + du_dtu.y *   2.  * r + du_dtu.z * 2. * x
-								  + du_dtv.x * (-2.) * r + du_dtv.y * (-4.) * z	+ du_dtv.z * 2. * y };
-			const float4 dv_dr = { 		   			       dv_dtu.y *   2.  * z - dv_dtu.z * 2. * y
-								  + dv_dtv.x * (-2.) * z +                        dv_dtv.z * 2. * x,
-								  						   dv_dtu.y *   2.  * y + dv_dtu.z * 2. * z
-								  + dv_dtv.x *   2.  * y + dv_dtv.y * (-4.) * x + dv_dtv.z * 2. * r,
-								  	dv_dtu.x * (-4.) * y + dv_dtu.y *   2.  * x - dv_dtu.z * 2. * r
-								  + dv_dtv.x *   2.  * x + 						  dv_dtv.z * 2. * z,
-								  	dv_dtu.x * (-4.) * z + dv_dtu.y *   2.  * r + dv_dtu.z * 2. * x
-								  + dv_dtv.x * (-2.) * r + dv_dtv.y * (-4.) * z	+ dv_dtv.z * 2. * y };
+			const glm::mat4 tu_r = {0., 0., -4*y, -4*z,
+										2*z, 2*y, 2*x, 2*r,
+										-2*y, 2*z, -2*r, 2*x,
+										0, 0, 0, 0};
+			const glm::mat4 tv_r = {-2*z, 2*y, 2*x, -2*r,
+										0, -4*x, 0, -4*z,
+										2*x, 2*r, 2*z, 2*y,
+										0, 0, 0, 0};
+			const glm::vec4 du_dr = tu_r * glm::vec4(du_dtu.x, du_dtu.y, du_dtu.z, 0) + tv_r * glm::vec4(du_dtv.x, du_dtv.y, du_dtv.z, 0);
+			const glm::vec4 dv_dr = tu_r * glm::vec4(dv_dtu.x, dv_dtu.y, dv_dtu.z, 0) + tv_r * glm::vec4(dv_dtv.x, dv_dtv.y, dv_dtv.z, 0);
 			
-			float3 du_dmean3d = {du_dhuw * dhuw_dmean3d.x, du_dhuw * dhuw_dmean3d.y, du_dhuw * dhuw_dmean3d.z};
-			float3 dv_dmean3d = {dv_dhuw * dhvw_dmean3d.x, dv_dhuw * dhvw_dmean3d.y, dv_dhuw * dhvw_dmean3d.z};
+			float3 du_dmean3d = {du_dhuw * dhuw_dmean3d.x + du_dhvw * dhvw_dmean3d.x, du_dhuw * dhuw_dmean3d.y + du_dhvw * dhvw_dmean3d.y, du_dhuw * dhuw_dmean3d.z + du_dhvw * dhvw_dmean3d.z};
+			float3 dv_dmean3d = {dv_dhvw * dhvw_dmean3d.x + dv_dhuw * dhuw_dmean3d.x, dv_dhvw * dhvw_dmean3d.y + dv_dhuw * dhuw_dmean3d.y, dv_dhvw * dhvw_dmean3d.z + dv_dhuw * dhuw_dmean3d.z};
 			// p_view (x,y,z) -> mean3d (x,y,z)
+
 			glm::mat3 dp_view_dmean3d = {RS[0][0] * du_dmean3d.x + RS[1][0] * dv_dmean3d.x + 1,
 										RS[0][0] * du_dmean3d.y + RS[1][0] * dv_dmean3d.y,
 										RS[0][0] * du_dmean3d.z + RS[1][0] * dv_dmean3d.z,
@@ -503,7 +482,7 @@ renderCUDA(
 										RS[0][2] * du_dmean3d.x + RS[1][2] * dv_dmean3d.x,
 										RS[0][2] * du_dmean3d.y + RS[1][2] * dv_dmean3d.y,
 										RS[0][2] * du_dmean3d.z + RS[1][2] * dv_dmean3d.z + 1};
-			glm::vec3 dL_dmean3d = dp_view_dmean3d * dL_dp;
+			glm::vec3 dL_dmean = dp_view_dmean3d * dL_dp;
 								
 			glm::mat3 dp_view_dscale = {RS[0][0] * du_dscale.x + RS[1][0] * dv_dscale.x + R[0][0] * u,
 										RS[0][0] * du_dscale.y + RS[1][0] * dv_dscale.y + R[1][0] * v,
@@ -537,22 +516,17 @@ renderCUDA(
 									RS[0][2] * du_dtv.y + RS[1][2] * dv_dtv.y,
 									RS[0][2] * du_dtv.z + S[1][2] * v + RS[1][2] * dv_dtv.z};
 			glm::vec3 dL_dtv = dp_view_dtv * dL_dp;
-			const float4 dL_dr = { 		   			       dL_dtu.y *   2.  * z - dL_dtu.z * 2. * y
-				+	dL_dtv.x * (-2.) * z +                        dL_dtv.z * 2. * x,
-										 dL_dtu.y *   2.  * y + dL_dtu.z * 2. * z
-				+ dL_dtv.x *   2.  * y + dL_dtv.y * (-4.) * x + dL_dtv.z * 2. * r,
-				  dL_dtu.x * (-4.) * y + dL_dtu.y *   2.  * x - dL_dtu.z * 2. * r
-				+ dL_dtv.x *   2.  * x + 						  dL_dtv.z * 2. * z,
-				  dL_dtu.x * (-4.) * z + dL_dtu.y *   2.  * r + dL_dtu.z * 2. * x
-				+ dL_dtv.x * (-2.) * r + dL_dtv.y * (-4.) * z	+ dL_dtv.z * 2. * y };
-
-
+			const glm::vec4 dL_dr = tu_r * glm::vec4(dL_dtu.x,dL_dtu.y,dL_dtu.z,0) + tv_r * glm::vec4(dL_dtv.x,dL_dtv.y,dL_dtv.z,0);
+			
+			// float3 dL_dmean = {0,0,0};
+			// float3 dL_dscale = {0,0};
+			// float4 dL_dr = {0,0,0,0};
 		
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * (dL_dalpha + dL_dw));
-			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dmean3d.x + dL_dv * dv_dmean3d.x + dL_dmean3d.x);
-			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dmean3d.y + dL_dv * dv_dmean3d.y + dL_dmean3d.y);
-			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dmean3d.z + dL_dv * dv_dmean3d.z + dL_dmean3d.z);
+			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dmean3d.x + dL_dv * dv_dmean3d.x + dL_dmean.x);
+			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dmean3d.y + dL_dv * dv_dmean3d.y + dL_dmean.y);
+			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dmean3d.z + dL_dv * dv_dmean3d.z + dL_dmean.z);
 			atomicAdd(&(dL_dscales[global_id].x), du_dscale.x * dL_du + dv_dscale.x * dL_dv + dL_dscale.x);
 			atomicAdd(&(dL_dscales[global_id].y), du_dscale.y * dL_du + dv_dscale.y * dL_dv + dL_dscale.y);
 			atomicAdd(&(dL_drot[global_id].x), du_dr.x * dL_du + dv_dr.x * dL_dv + dL_dr.x);
