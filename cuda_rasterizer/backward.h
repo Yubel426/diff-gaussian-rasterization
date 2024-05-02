@@ -34,6 +34,8 @@ namespace BACKWARD
 		const float scale_modifier,
 		const float* projmatrix,
 		const float* viewmatrix,
+		const float focal_x,
+		const float focal_y,
 		const float* colors,
 		const float* final_Ts,
 		const uint32_t* n_contrib,

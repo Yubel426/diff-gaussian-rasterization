@@ -413,6 +413,7 @@ void CudaRasterizer::Rasterizer::backward(
 		scale_modifier,
 		projmatrix,
 		viewmatrix,
+		focal_x, focal_y,
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,

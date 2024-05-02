@@ -436,10 +436,10 @@ renderCUDA(
 				{
 					median_D = z_origin;
 				}
-			// l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
-			// A += alpha * T;
-			// D_1 += alpha * T * z_ndc;
-			// D_2 += alpha * T * z_ndc * z_ndc;
+			l_dd += alpha * T * (z_ndc * z_ndc * A + D_2 - 2 * z_ndc * D_1);
+			A += alpha * T;
+			D_1 += alpha * T * z_ndc;
+			D_2 += alpha * T * z_ndc * z_ndc;
 			T = test_T;
 			// Keep track of last range entry to update this
 			// pixel.

@@ -197,6 +197,8 @@ renderCUDA(
 	const float scale_modifier,
 	const float* projmatrix,
 	const float* viewmatrix,
+	const float focal_x,
+	const float focal_y,
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
@@ -252,6 +254,8 @@ renderCUDA(
 
 	float accum_rec[C] = { 0 };
 	float dL_dpixel[C];
+	float accum_dLd_domega_rec = 0;
+	float last_dLd_domega = 0;
 	float3 dda;
 	float dL_dmedian_depth;
 	if (inside){
@@ -408,6 +412,10 @@ renderCUDA(
 				// many that were affected by this Gaussian.
 				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
 			}
+			accum_dLd_domega_rec = last_alpha * last_dLd_domega + (1.f - last_alpha) * accum_dLd_domega_rec;
+			last_dLd_domega = dL_dw;
+			float dL_dopa = (T * (dL_dw - accum_dLd_domega_rec));
+
 			dL_dalpha *= test_T;
 			T = test_T;
 			// Update last alpha (to be used in the next iteration)
@@ -419,10 +427,27 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				bg_dot_dpixel += bg_color[i] * dL_dpixel[i];
 			dL_dalpha += (-T_final / (1.f - alpha)) * bg_dot_dpixel;
-
+			dL_dalpha += dL_dopa;
 			if (!filter){
-				dL_du += o * (dL_dalpha+dL_dw) * G * (-u);
-				dL_dv += o * (dL_dalpha+dL_dw) * G * (-v);	
+				dL_du += o * (dL_dalpha) * G * (-u);
+				dL_dv += o * (dL_dalpha) * G * (-v);	
+			}
+			else{
+				const float px = viewmatrix[0] * p.x + viewmatrix[4] * p.y + viewmatrix[8] * p.z + viewmatrix[12];
+				const float py = viewmatrix[1] * p.x + viewmatrix[5] * p.y + viewmatrix[9] * p.z + viewmatrix[13];
+				const float pz = viewmatrix[2] * p.x + viewmatrix[6] * p.y + viewmatrix[10] * p.z + viewmatrix[14];
+				const float dpx_dPx = viewmatrix[0] / pz - (px * viewmatrix[2]) / (pz * pz);
+				const float dpx_dPy = viewmatrix[4] / pz - (px * viewmatrix[6]) / (pz * pz);
+				const float dpx_dPz = viewmatrix[8] / pz - (px * viewmatrix[10]) / (pz * pz);
+				const float dpy_dPx = viewmatrix[1] / pz - (py * viewmatrix[2]) / (pz * pz);
+				const float dpy_dPy = viewmatrix[5] / pz - (py * viewmatrix[6]) / (pz * pz);
+				const float dpy_dPz = viewmatrix[9] / pz - (py * viewmatrix[10]) / (pz * pz);
+				const float dL_dpx_margin = o * dL_dalpha * 2 * G * d.x * focal_x;
+				const float dL_dpy_margin = o * dL_dalpha * 2 * G * d.y * focal_y;
+				atomicAdd(&(dL_dmean3D[global_id].x), dpx_dPx * dL_dpx_margin + dpy_dPx * dL_dpy_margin);
+				atomicAdd(&(dL_dmean3D[global_id].y), dpx_dPy * dL_dpx_margin + dpy_dPy * dL_dpy_margin);
+				atomicAdd(&(dL_dmean3D[global_id].z), dpx_dPz * dL_dpx_margin + dpy_dPz * dL_dpy_margin);
+	
 			}
 			
 
@@ -459,13 +484,13 @@ renderCUDA(
 			const float2 dv_dscale = { dv_dhux * (W_T_hx.x * tv.x + W_T_hx.y * tv.y + W_T_hx.z * tv.z) + dv_dhvx * (W_T_hy.x * tv.x + W_T_hy.y * tv.y + W_T_hy.z * tv.z), 
 									   dv_dhuy * (W_T_hx.x * tv.x + W_T_hx.y * tv.y + W_T_hx.z * tv.z) + dv_dhvy * (W_T_hy.x * tv.x + W_T_hy.y * tv.y + W_T_hy.z * tv.z)};
 			const glm::mat4 tu_r = {0., 0., -4*y, -4*z,
-										2*z, 2*y, 2*x, 2*r,
-										-2*y, 2*z, -2*r, 2*x,
-										0, 0, 0, 0};
+									2*z, 2*y, 2*x, 2*r,
+									-2*y, 2*z, -2*r, 2*x,
+									0, 0, 0, 0};
 			const glm::mat4 tv_r = {-2*z, 2*y, 2*x, -2*r,
-										0, -4*x, 0, -4*z,
-										2*x, 2*r, 2*z, 2*y,
-										0, 0, 0, 0};
+									0, -4*x, 0, -4*z,
+									2*x, 2*r, 2*z, 2*y,
+									0, 0, 0, 0};
 			const glm::vec4 du_dr = tu_r * glm::vec4(du_dtu.x, du_dtu.y, du_dtu.z, 0) + tv_r * glm::vec4(du_dtv.x, du_dtv.y, du_dtv.z, 0);
 			const glm::vec4 dv_dr = tu_r * glm::vec4(dv_dtu.x, dv_dtu.y, dv_dtu.z, 0) + tv_r * glm::vec4(dv_dtv.x, dv_dtv.y, dv_dtv.z, 0);
 			
@@ -516,14 +541,14 @@ renderCUDA(
 									RS[0][2] * du_dtv.y + RS[1][2] * dv_dtv.y,
 									RS[0][2] * du_dtv.z + S[1][2] * v + RS[1][2] * dv_dtv.z};
 			glm::vec3 dL_dtv = dp_view_dtv * dL_dp;
-			const glm::vec4 dL_dr = tu_r * glm::vec4(dL_dtu.x,dL_dtu.y,dL_dtu.z,0) + tv_r * glm::vec4(dL_dtv.x,dL_dtv.y,dL_dtv.z,0);
+			glm::vec4 dL_dr = tu_r * glm::vec4(dL_dtu.x,dL_dtu.y,dL_dtu.z,0) + tv_r * glm::vec4(dL_dtv.x,dL_dtv.y,dL_dtv.z,0);
 			
 			// float3 dL_dmean = {0,0,0};
-			// float3 dL_dscale = {0,0};
-			// float4 dL_dr = {0,0,0,0};
+			// dL_dscale = {0.f,0.f,0.f};
+			// dL_dr = {0.f,0.f,0.f,0.f};
 		
 			// Update gradients w.r.t. opacity of the Gaussian
-			atomicAdd(&(dL_dopacity[global_id]), G * (dL_dalpha + dL_dw));
+			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
 			atomicAdd(&(dL_dmean3D[global_id].x), dL_du * du_dmean3d.x + dL_dv * dv_dmean3d.x + dL_dmean.x);
 			atomicAdd(&(dL_dmean3D[global_id].y), dL_du * du_dmean3d.y + dL_dv * dv_dmean3d.y + dL_dmean.y);
 			atomicAdd(&(dL_dmean3D[global_id].z), dL_du * du_dmean3d.z + dL_dv * dv_dmean3d.z + dL_dmean.z);
@@ -599,6 +624,7 @@ void BACKWARD::render(
 	const float scale_modifier,
 	const float* projmatrix,
 	const float* viewmatrix,
+	const float focal_x, float focal_y,
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
@@ -626,6 +652,7 @@ void BACKWARD::render(
 		scale_modifier,
 		projmatrix,
 		viewmatrix,
+		focal_x, focal_y,
 		colors,
 		final_Ts,
 		n_contrib,
