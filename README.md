@@ -1,4 +1,5 @@
 # diff-gaussian-rasterization
+re-implementation of 2dgs cuda kernel
 ## Result
 **scan40**
 <p float="left">
